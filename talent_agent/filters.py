@@ -15,15 +15,39 @@ def filter_jobs(jobs: list[dict[str, Any]], config: dict[str, Any]) -> list[dict
             continue
         if kind == "unknown" and len(allowed_types) == 1:
             continue
+        salary = str(job.get("salary", ""))
+        compensation_period = _compensation_period(salary)
+        expected_period = "daily" if kind == "contract" else "annual" if kind == "permanent" else None
+        if compensation_period and expected_period and compensation_period != expected_period:
+            continue
         minimum = config["minimum_day_rate"] if kind == "contract" else config["minimum_annual_salary"] if kind == "permanent" else None
         if minimum is not None:
-            amount = _matching_compensation(str(job.get("salary", "")), kind, str(config.get("currency", "GBP")))
-            if amount is None and config["exclude_unknown_compensation"]:
+            amount = _matching_compensation(salary, kind, str(config.get("currency", "GBP")))
+            exclude_unknown = (
+                not config.get(
+                    "include_unknown_contract_compensation",
+                    not config["exclude_unknown_compensation"],
+                )
+                if kind == "contract"
+                else config["exclude_unknown_compensation"]
+            )
+            if amount is None and exclude_unknown:
                 continue
             if amount is not None and amount < float(minimum):
                 continue
         filtered.append(job)
     return filtered
+
+
+def _compensation_period(value: str) -> str | None:
+    text = value.lower()
+    daily = bool(re.search(r"(?:/\s*day|per\s+day|daily|a\s+day|\bday\s+rate\b)", text))
+    annual = bool(re.search(r"(?:/\s*(?:year|yr|annum|pa)|per\s+(?:year|annum)|\bannual(?:ly)?\b|\bpa\b|\bp\.a\.\b)", text))
+    if daily and not annual:
+        return "daily"
+    if annual and not daily:
+        return "annual"
+    return None
 
 
 def _matching_compensation(value: str, employment_type: str, currency: str) -> float | None:
@@ -39,18 +63,10 @@ def _matching_compensation(value: str, employment_type: str, currency: str) -> f
     if explicit_currency and explicit_currency != currency:
         return None
     text = text.replace("£", "").replace("€", "").replace("$", "")
-    daily = bool(re.search(r"(?:/\s*day|per\s+day|daily|a\s+day|\bday\s+rate\b)", text))
-    annual = bool(re.search(r"(?:/\s*(?:year|yr|annum|pa)|per\s+(?:year|annum)|\bannual(?:ly)?\b|\bpa\b|\bp\.a\.\b|\bper\s+annum\b)", text))
-    if daily and employment_type != "contract":
+    period = _compensation_period(text)
+    if period == "daily" and employment_type != "contract":
         return None
-    if annual and employment_type != "permanent":
-        return None
-    if daily and employment_type == "contract" or annual and employment_type == "permanent":
-        period_known = True
-    else:
-        # When a listing omits a period, use the employment type as the intended pay basis.
-        period_known = not daily and not annual
-    if not period_known:
+    if period == "annual" and employment_type != "permanent":
         return None
     numbers = [float(value.replace(",", "")) for value in re.findall(r"\d[\d,]*(?:\.\d+)?", text)]
     if not numbers:

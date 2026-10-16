@@ -48,6 +48,11 @@ def load_search_config(path: Path = DEFAULT_SEARCH_CONFIG) -> dict[str, Any]:
     config.setdefault("minimum_day_rate", None)
     config.setdefault("minimum_annual_salary", None)
     config.setdefault("exclude_unknown_compensation", False)
+    if (
+        "include_unknown_contract_compensation" in config
+        and not isinstance(config["include_unknown_contract_compensation"], bool)
+    ):
+        raise ValueError("include_unknown_contract_compensation must be true or false")
     if not isinstance(config.get("output", {}), dict):
         raise ValueError("Search config 'output' must be an object")
     output = {**DEFAULT_OUTPUT_CONFIG, **config.get("output", {})}

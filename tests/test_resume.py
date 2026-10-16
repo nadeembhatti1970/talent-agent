@@ -31,6 +31,12 @@ class ResumeTests(unittest.TestCase):
             config_path.write_text(json.dumps({"location": "London"}), encoding="utf-8")
             self.assertEqual(load_search_config(config_path)["locations"], ["London"])
 
+    def test_default_search_config_has_separate_locations_and_contract_review_setting(self) -> None:
+        config = load_search_config()
+
+        self.assertGreater(len(config["locations"]), 1)
+        self.assertTrue(config["include_unknown_contract_compensation"])
+
     def test_search_queries_each_location_and_deduplicates_results(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             root = Path(temporary_dir)
