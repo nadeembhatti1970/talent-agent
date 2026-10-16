@@ -48,6 +48,9 @@ def load_search_config(path: Path = DEFAULT_SEARCH_CONFIG) -> dict[str, Any]:
     config.setdefault("minimum_day_rate", None)
     config.setdefault("minimum_annual_salary", None)
     config.setdefault("exclude_unknown_compensation", False)
+    config.setdefault("exclude_security_clearance", False)
+    if not isinstance(config["exclude_security_clearance"], bool):
+        raise ValueError("exclude_security_clearance must be true or false")
     if (
         "include_unknown_contract_compensation" in config
         and not isinstance(config["include_unknown_contract_compensation"], bool)

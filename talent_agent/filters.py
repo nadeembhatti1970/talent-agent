@@ -4,10 +4,45 @@ import re
 from typing import Any
 
 
+_CLEARANCE_REQUIRED_PATTERNS = (
+    re.compile(
+        r"\b(?:security\s+)?clearance\b"
+        r"(?:\s+(?:is\s+)?(?:required|essential|mandatory|a\s+requirement))\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:required|essential|mandatory)\s+"
+        r"(?:(?:active|current|valid|existing)\s+)?"
+        r"(?:security\s+)?clearance\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:must|need(?:s)?\s+to)\s+"
+        r"(?:already\s+)?(?:hold|have|possess|obtain|maintain|be\s+eligible\s+for)\b"
+        r"[^.\n]{0,80}\b(?:security\s+)?clearance\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:SC|DV|CTC|Developed\s+Vetting|Counter\s+Terrorist\s+Check)\s+"
+        r"(?:clearance|vetting|eligibility)\b"
+        r"[^.\n]{0,60}\b(?:required|essential|mandatory|must\s+have|must\s+hold)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:required|essential|mandatory|must\s+have|must\s+hold)\b"
+        r"[^.\n]{0,60}\b(?:SC|DV|CTC|Developed\s+Vetting|Counter\s+Terrorist\s+Check)\s+"
+        r"(?:clearance|vetting|eligibility)\b",
+        re.IGNORECASE,
+    ),
+)
+
+
 def filter_jobs(jobs: list[dict[str, Any]], config: dict[str, Any]) -> list[dict[str, Any]]:
     allowed_types = set(config["employment_types"])
     filtered: list[dict[str, Any]] = []
     for job in jobs:
+        if config.get("exclude_security_clearance", False) and _requires_security_clearance(job):
+            continue
         kind = str(job.get("employment_type", "unknown")).lower()
         # Unknown types remain eligible when both categories are selected; a single-category
         # search requires a positive classification to avoid silently mixing job types.
@@ -37,6 +72,17 @@ def filter_jobs(jobs: list[dict[str, Any]], config: dict[str, Any]) -> list[dict
                 continue
         filtered.append(job)
     return filtered
+
+
+def _requires_security_clearance(job: dict[str, Any]) -> bool:
+    clearance_fields = (
+        job.get("security_clearance"),
+        job.get("clearance"),
+        job.get("title"),
+        job.get("description"),
+    )
+    text = "\n".join(str(value) for value in clearance_fields if value)
+    return any(pattern.search(text) for pattern in _CLEARANCE_REQUIRED_PATTERNS)
 
 
 def _compensation_period(value: str) -> str | None:

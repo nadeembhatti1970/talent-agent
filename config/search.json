@@ -22,6 +22,7 @@
   "minimum_annual_salary": 150000,
   "exclude_unknown_compensation": true,
   "include_unknown_contract_compensation": true,
+  "exclude_security_clearance": true,
   "output": {
     "root_dir": "outputs",
     "dated_subfolders": true,

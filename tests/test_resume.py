@@ -21,12 +21,14 @@ class ResumeTests(unittest.TestCase):
                 json.dumps({
                     "locations": ["London", "Manchester"],
                     "github_profile_url": "https://github.com/example-user",
+                    "exclude_security_clearance": True,
                 }),
                 encoding="utf-8",
             )
             config = load_search_config(config_path)
             self.assertEqual(config["locations"], ["London", "Manchester"])
             self.assertEqual(config["github_profile_url"], "https://github.com/example-user")
+            self.assertTrue(config["exclude_security_clearance"])
 
             config_path.write_text(json.dumps({"location": "London"}), encoding="utf-8")
             self.assertEqual(load_search_config(config_path)["locations"], ["London"])

@@ -32,6 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--min-day-rate", type=float, help="Minimum contract day rate in configured currency")
     run.add_argument("--min-annual-salary", type=float, help="Minimum permanent annual salary in configured currency")
     run.add_argument("--exclude-unknown-compensation", action="store_true", default=None, help="Reject listings without a parseable matching pay amount")
+    run.add_argument(
+        "--exclude-security-clearance",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Exclude jobs that require security clearance (overrides config)",
+    )
     run.add_argument("--linkedin-url", default=LINKEDIN_PROFILE_URL, help="Candidate profile URL (recorded as context; not fetched)")
     run.add_argument("--github-url", default=None, help="Candidate GitHub profile URL (overrides config)")
     run.add_argument("--output-dir", type=Path, help="Override configured output root directory")
@@ -65,6 +71,11 @@ def main() -> int:
         )
         employment_types = args.employment_type if args.employment_type is not None else config["employment_types"]
         exclude_unknown = args.exclude_unknown_compensation if args.exclude_unknown_compensation is not None else config["exclude_unknown_compensation"]
+        exclude_security_clearance = (
+            args.exclude_security_clearance
+            if args.exclude_security_clearance is not None
+            else config["exclude_security_clearance"]
+        )
         output_config = config["output"]
         output_path = run_pipeline(
             jobs_path=args.jobs, search=args.search, resume_from=args.resume,
@@ -75,6 +86,7 @@ def main() -> int:
             minimum_day_rate=args.min_day_rate if args.min_day_rate is not None else config["minimum_day_rate"],
             minimum_annual_salary=args.min_annual_salary if args.min_annual_salary is not None else config["minimum_annual_salary"],
             exclude_unknown_compensation=exclude_unknown,
+            exclude_security_clearance=exclude_security_clearance,
             linkedin_url=args.linkedin_url,
             github_url=github_url,
             output_root=args.output_dir or Path(output_config["root_dir"]), run_id=args.run_id,
