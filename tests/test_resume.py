@@ -67,14 +67,56 @@ class ResumeTests(unittest.TestCase):
                     cv_path=cv_path,
                     locations=["London", "Manchester"],
                     keywords=["Platform Engineer"],
+                    max_results=4,
                     output_root=root / "outputs",
                     dated_subfolders=False,
                     tracker_formats=["csv"],
                 )
 
             self.assertEqual([call.args[1] for call in fetch.call_args_list], ["London", "Manchester"])
+            self.assertEqual([call.args[3] for call in fetch.call_args_list], [2, 2])
             raw_jobs = json.loads((output_dir / "raw_jobs.json").read_text(encoding="utf-8"))
             self.assertEqual(len(raw_jobs), 1)
+
+    def test_search_enforces_global_max_results_even_if_actor_exceeds_requested_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            cv_path = root / "cv.txt"
+            cv_path.write_text("Candidate CV", encoding="utf-8")
+
+            def jobs_for(prefix: str) -> list[dict[str, str]]:
+                return [
+                    {
+                        "id": f"{prefix}-{index}",
+                        "title": f"Platform Engineer {prefix} {index}",
+                        "company": "Example Ltd",
+                        "employment_type": "permanent",
+                        "description": "Platform engineering role.",
+                    }
+                    for index in range(5)
+                ]
+
+            fetch = Mock(side_effect=[jobs_for("london"), jobs_for("manchester")])
+            researcher = Mock()
+            researcher.normalize.side_effect = lambda jobs, *_: jobs
+            analyst = Mock()
+            analyst.evaluate.return_value = []
+            with (
+                patch("talent_agent.pipeline.fetch_apify_jobs", fetch),
+                patch("talent_agent.pipeline.ResearcherAgent", return_value=researcher),
+                patch("talent_agent.pipeline.CareerAnalystAgent", return_value=analyst),
+                patch("talent_agent.pipeline.SummaryReportWriterAgent"),
+            ):
+                output_dir = run_pipeline(
+                    jobs_path=None, search=True, cv_path=cv_path,
+                    locations=["London", "Manchester"], keywords=["Platform Engineer"],
+                    max_results=4, output_root=root / "outputs", dated_subfolders=False,
+                    tracker_formats=["csv"],
+                )
+
+            raw_jobs = json.loads((output_dir / "raw_jobs.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(raw_jobs), 4)
+            self.assertEqual([call.args[3] for call in fetch.call_args_list], [2, 2])
 
     def test_analyst_checkpoints_completed_batches_and_restores_them(self) -> None:
         jobs = [{"job_id": f"job-{index}", "title": f"Role {index}"} for index in range(4)]

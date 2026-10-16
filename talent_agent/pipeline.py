@@ -112,12 +112,20 @@ def run_pipeline(
     else:
         if search:
             raw = []
+            remaining_locations = len(search_locations)
+            remaining_results = max_results
             for search_location in search_locations:
+                location_limit = (remaining_results + remaining_locations - 1) // remaining_locations
                 say(
                     f"\n🔎 Researcher is searching Apify for {', '.join(keywords or [])} "
-                    f"in {search_location or 'any location'} (up to {max_results} results)…"
+                    f"in {search_location or 'any location'} (up to {location_limit} results)…"
                 )
-                raw.extend(fetch_apify_jobs(", ".join(keywords or []), search_location, date_posted, max_results))
+                location_jobs = fetch_apify_jobs(
+                    ", ".join(keywords or []), search_location, date_posted, location_limit
+                )
+                raw.extend(location_jobs[:location_limit])
+                remaining_results -= location_limit
+                remaining_locations -= 1
         else:
             assert jobs_path is not None
             say(f"\n🔎 Researcher is loading job listings from {jobs_path}…")
@@ -127,6 +135,8 @@ def run_pipeline(
         if not search and len(raw) > max_results:
             raw = raw[:max_results]
         raw_jobs = normalize_jobs(raw)
+        if len(raw_jobs) > max_results:
+            raw_jobs = raw_jobs[:max_results]
         raw_path = output_dir / raw_jobs_filename
         write_json(raw_path, raw_jobs)
     say(f"   Found {len(raw_jobs)} unique job listing(s).")
