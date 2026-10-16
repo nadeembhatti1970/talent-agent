@@ -1,0 +1,366 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+from .analyst import CareerAnalystAgent
+from .documents import APPLICATION_PROMPT_VERSION, generate_application_docs, read_cv
+from .filters import filter_jobs
+from .llm import is_safety_metadata_only
+from .memory import read_json_object, write_json
+from .reporter import SummaryReportWriterAgent
+from .researcher import ResearcherAgent, fetch_apify_jobs, normalize_jobs
+
+
+def run_pipeline(
+    *, jobs_path: Path | None, search: bool, cv_path: Path,
+    resume_from: Path | None = None,
+    candidate_path: Path | None = None, keywords: list[str] | None = None,
+    location: str = "", locations: list[str] | None = None,
+    date_posted: str = "past_week", max_results: int = 50,
+    minimum_score: float = 70.0,
+    employment_types: list[str] | None = None, currency: str = "GBP",
+    minimum_day_rate: float | None = None, minimum_annual_salary: float | None = None,
+    exclude_unknown_compensation: bool = False,
+    linkedin_url: str = "", github_url: str = "",
+    output_root: Path = Path("outputs"), run_id: str = "",
+    dated_subfolders: bool = True, date_format: str = "%Y-%m-%d",
+    raw_jobs_filename: str = "raw_jobs.json", prioritized_jobs_filename: str = "prioritized_jobs.json",
+    tracker_html_filename: str = "tracker.html", tracker_csv_filename: str = "tracker.csv",
+    tracker_formats: list[str] | None = None, application_format: str = "docx",
+    model: str | None = None,
+) -> Path:
+    def say(message: str) -> None:
+        print(message, flush=True)
+
+    if not cv_path.is_file():
+        raise FileNotFoundError(f"CV file not found: {cv_path}")
+    selected_sources = int(search) + int(jobs_path is not None) + int(resume_from is not None)
+    if selected_sources != 1:
+        raise ValueError("Choose exactly one of --search, --jobs, or --resume")
+    cv = read_cv(cv_path)
+    if not cv.strip():
+        raise ValueError("CV file is empty")
+    search_locations = locations if locations is not None else ([location] if location.strip() else [""])
+    search_locations = [value.strip() for value in search_locations if value.strip()] or [""]
+    model_name = model or os.getenv("OPENROUTER_MODEL", "openrouter/free")
+    say(f"\n🚀 Talent Agent is starting with {model_name}.")
+    say(f"📄 Candidate CV loaded from {cv_path}.")
+    candidate: dict[str, Any] = {
+        "name": "", "linkedin_url": linkedin_url, "github_url": "",
+        "minimum_match_score": minimum_score, "summary": "",
+    }
+    if candidate_path:
+        candidate.update(json.loads(candidate_path.read_text(encoding="utf-8")))
+    if linkedin_url:
+        candidate["linkedin_url"] = linkedin_url
+    if github_url.strip():
+        candidate["github_url"] = github_url.strip()
+    github_url = str(candidate.get("github_url", "")).strip()
+    candidate["locations"] = search_locations
+    if minimum_day_rate is not None:
+        candidate["minimum_day_rate"] = minimum_day_rate
+    if minimum_annual_salary is not None:
+        candidate["minimum_annual_salary"] = minimum_annual_salary
+    candidate["currency"] = currency
+    candidate["employment_types"] = employment_types or ["contract", "permanent"]
+    state_path: Path | None = None
+    if resume_from is not None:
+        output_dir = resume_from.expanduser().resolve()
+        if not output_dir.is_dir():
+            raise FileNotFoundError(f"Resume directory not found: {output_dir}")
+        state_path = output_dir / "agent_outputs" / "run_state.json"
+        if state_path.is_file():
+            run_state = read_json_object(state_path)
+            if run_state.get("version") != 1:
+                raise ValueError(f"Unsupported resume state version in {state_path}")
+            artifacts = run_state.get("artifacts", {})
+            if not isinstance(artifacts, dict):
+                raise ValueError(f"Invalid artifact settings in {state_path}")
+            raw_jobs_filename = str(artifacts.get("raw_jobs_filename", raw_jobs_filename))
+            prioritized_jobs_filename = str(artifacts.get("prioritized_jobs_filename", prioritized_jobs_filename))
+            tracker_html_filename = str(artifacts.get("tracker_html_filename", tracker_html_filename))
+            tracker_csv_filename = str(artifacts.get("tracker_csv_filename", tracker_csv_filename))
+            tracker_formats = artifacts.get("tracker_formats", tracker_formats)
+            application_format = str(artifacts.get("application_format", application_format))
+        else:
+            run_state = {}
+    else:
+        run_name = date.today().strftime(date_format)
+        if run_id:
+            run_name = f"{run_name}_{run_id}"
+        output_dir = output_root / run_name if dated_subfolders else output_root
+        if run_id and not dated_subfolders:
+            output_dir = output_dir / run_id
+        run_state = {}
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "applications").mkdir(exist_ok=True)
+    memory_dir = output_dir / "agent_outputs"
+    memory_dir.mkdir(exist_ok=True)
+    if resume_from is not None:
+        raw_path = output_dir / raw_jobs_filename
+        if not raw_path.is_file():
+            raise FileNotFoundError(f"Cannot resume: saved raw jobs file not found: {raw_path}")
+        raw_jobs = json.loads(raw_path.read_text(encoding="utf-8"))
+        if not isinstance(raw_jobs, list) or not all(isinstance(item, dict) for item in raw_jobs):
+            raise ValueError(f"Saved jobs must be a JSON array of objects: {raw_path}")
+        say(f"\n⏯️ Resuming saved run in {output_dir}…")
+    else:
+        if search:
+            raw = []
+            for search_location in search_locations:
+                say(
+                    f"\n🔎 Researcher is searching Apify for {', '.join(keywords or [])} "
+                    f"in {search_location or 'any location'} (up to {max_results} results)…"
+                )
+                raw.extend(fetch_apify_jobs(", ".join(keywords or []), search_location, date_posted, max_results))
+        else:
+            assert jobs_path is not None
+            say(f"\n🔎 Researcher is loading job listings from {jobs_path}…")
+            raw = json.loads(jobs_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, list) or not all(isinstance(item, dict) for item in raw):
+                raise ValueError("Jobs input must be a JSON array of objects")
+        if not search and len(raw) > max_results:
+            raw = raw[:max_results]
+        raw_jobs = normalize_jobs(raw)
+        raw_path = output_dir / raw_jobs_filename
+        write_json(raw_path, raw_jobs)
+    say(f"   Found {len(raw_jobs)} unique job listing(s).")
+    say(f"   🗂️ Raw listings saved to {output_dir / raw_jobs_filename}")
+
+    researcher_path = memory_dir / "researcher.json"
+    analyst_path = memory_dir / "career_analyst.json"
+    cv_editor_path = memory_dir / "cv_editor.json"
+    cover_letter_path = memory_dir / "cover_letter_writer.json"
+    expected_context = {
+        "cv_sha256": hashlib.sha256(cv.encode("utf-8")).hexdigest(),
+        "candidate_sha256": hashlib.sha256(
+            json.dumps(candidate, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "raw_jobs_sha256": hashlib.sha256(raw_path.read_bytes()).hexdigest(),
+    }
+    if resume_from is not None and run_state:
+        saved_context = run_state.get("context")
+        if not isinstance(saved_context, dict):
+            raise ValueError(f"Invalid saved run context in {state_path}")
+        if (
+            saved_context.get("cv_sha256") != expected_context["cv_sha256"]
+            or saved_context.get("raw_jobs_sha256") != expected_context["raw_jobs_sha256"]
+        ):
+            raise ValueError(
+                "Cannot resume because the saved CV or raw jobs differ from this run. "
+                "Use the original inputs or start a new run."
+            )
+        if run_state.get("model") != model_name:
+            raise ValueError(
+                f"Cannot resume with model '{model_name}'; the saved run used '{run_state.get('model')}'. "
+                "Use the original model or start a new run."
+            )
+        if saved_context.get("candidate_sha256") != expected_context["candidate_sha256"]:
+            say(
+                "   Candidate preferences changed; re-running Career Analyst and regenerating "
+                "application documents from the saved job listings."
+            )
+            write_json(
+                analyst_path,
+                {"version": 1, "status": "in_progress", "evaluations": []},
+            )
+            for checkpoint_path in (cv_editor_path, cover_letter_path):
+                write_json(
+                    checkpoint_path,
+                    {
+                        "version": 1,
+                        "prompt_version": APPLICATION_PROMPT_VERSION,
+                        "outputs": {},
+                    },
+                )
+            stages = run_state.get("stages")
+            if isinstance(stages, dict):
+                for stage in ("career_analyst", "cv_editor", "cover_letter_writer", "report"):
+                    stages[stage] = "pending"
+            run_state["context"] = expected_context
+            write_json(state_path, run_state)
+    if not run_state:
+        run_state = {
+            "version": 1,
+            "model": model_name,
+            "context": expected_context,
+            "artifacts": {
+                "raw_jobs_filename": raw_jobs_filename,
+                "prioritized_jobs_filename": prioritized_jobs_filename,
+                "tracker_html_filename": tracker_html_filename,
+                "tracker_csv_filename": tracker_csv_filename,
+                "tracker_formats": tracker_formats,
+                "application_format": application_format,
+            },
+            "stages": {},
+        }
+    stages = run_state.setdefault("stages", {})
+    if not isinstance(stages, dict):
+        raise ValueError(f"Invalid stage progress in {state_path or memory_dir / 'run_state.json'}")
+
+    def set_stage(name: str, status: str) -> None:
+        stages[name] = status
+        write_json(state_path or memory_dir / "run_state.json", run_state)
+
+    if resume_from is None:
+        write_json(researcher_path, {"version": 1, "status": "pending", "jobs": []})
+        write_json(analyst_path, {"version": 1, "status": "in_progress", "evaluations": []})
+        write_json(cv_editor_path, {
+            "version": 1, "prompt_version": APPLICATION_PROMPT_VERSION, "outputs": {},
+        })
+        write_json(cover_letter_path, {
+            "version": 1, "prompt_version": APPLICATION_PROMPT_VERSION, "outputs": {},
+        })
+    else:
+        for checkpoint_path, default in (
+            (researcher_path, {"version": 1, "status": "pending", "jobs": []}),
+            (analyst_path, {"version": 1, "status": "in_progress", "evaluations": []}),
+            (cv_editor_path, {
+                "version": 1, "prompt_version": APPLICATION_PROMPT_VERSION, "outputs": {},
+            }),
+            (cover_letter_path, {
+                "version": 1, "prompt_version": APPLICATION_PROMPT_VERSION, "outputs": {},
+            }),
+        ):
+            if not checkpoint_path.exists():
+                write_json(checkpoint_path, default)
+    write_json(state_path or memory_dir / "run_state.json", run_state)
+
+    researcher_data = read_json_object(researcher_path)
+    cached_relevant = researcher_data.get("jobs")
+    if researcher_data.get("status") == "complete":
+        if not isinstance(cached_relevant, list) or not all(isinstance(job, dict) for job in cached_relevant):
+            raise ValueError(f"Invalid saved Researcher output: {researcher_path}")
+        relevant_jobs = cached_relevant
+        say(f"\n🧭 Researcher restored {len(relevant_jobs)} listing(s) from saved output.")
+    else:
+        set_stage("researcher", "in_progress")
+        say("\n🧭 Researcher is checking listing quality and search relevance…")
+        researcher = ResearcherAgent(model)
+        relevant_jobs = researcher.normalize(
+            raw_jobs,
+            ", ".join(keywords or []) or "all provided roles",
+            ", ".join(search_locations) or "any location",
+        )
+        write_json(researcher_path, {"version": 1, "status": "complete", "jobs": relevant_jobs})
+        set_stage("researcher", "complete")
+    say(f"   {len(relevant_jobs)} listing(s) passed the relevance review.")
+    filter_config = {
+        "employment_types": employment_types or ["contract", "permanent"],
+        "minimum_day_rate": minimum_day_rate,
+        "minimum_annual_salary": minimum_annual_salary,
+        "exclude_unknown_compensation": exclude_unknown_compensation,
+        "currency": currency,
+    }
+    relevant_jobs = filter_jobs(relevant_jobs, filter_config)
+    say(f"   {len(relevant_jobs)} listing(s) remain after employment and compensation filters.")
+    analyst_data = read_json_object(analyst_path)
+    previous_results = analyst_data.get("evaluations", [])
+    if not isinstance(previous_results, list) or not all(isinstance(item, dict) for item in previous_results):
+        raise ValueError(f"Invalid saved Career Analyst output: {analyst_path}")
+    set_stage("career_analyst", "in_progress")
+    analyst = CareerAnalystAgent(model)
+    say(f"\n🧠 Career Analyst is scoring {len(relevant_jobs)} listing(s) against your CV (minimum score {minimum_score:.0f})…")
+    prioritized = analyst.evaluate(
+        relevant_jobs,
+        cv,
+        candidate,
+        minimum_score,
+        previous_results=previous_results,
+        on_checkpoint=lambda evaluations: write_json(
+            analyst_path,
+            {"version": 1, "status": "in_progress", "evaluations": evaluations},
+        ),
+    )
+    analyst_data["status"] = "complete"
+    analyst_data["evaluations"] = analyst_data.get("evaluations", previous_results)
+    # The callback writes each completed batch; persist the completion marker even for empty runs.
+    if analyst_path.is_file():
+        analyst_data = read_json_object(analyst_path)
+    analyst_data = read_json_object(analyst_path)
+    analyst_data["status"] = "complete"
+    write_json(analyst_path, analyst_data)
+    set_stage("career_analyst", "complete")
+    say(f"   ✅ {len(prioritized)} role(s) qualified.")
+    prioritized_path = output_dir / prioritized_jobs_filename
+    write_json(prioritized_path, prioritized)
+
+    cv_editor_data = read_json_object(cv_editor_path)
+    cv_outputs = cv_editor_data.get("outputs", {})
+    cover_letter_data = read_json_object(cover_letter_path)
+    cover_letter_outputs = cover_letter_data.get("outputs", {})
+    if not isinstance(cv_outputs, dict) or not isinstance(cover_letter_outputs, dict):
+        raise ValueError("Saved application-agent outputs must be JSON objects keyed by job ID")
+    if cv_editor_data.get("prompt_version") != APPLICATION_PROMPT_VERSION:
+        cv_outputs = {}
+    if cover_letter_data.get("prompt_version") != APPLICATION_PROMPT_VERSION:
+        cover_letter_outputs = {}
+    set_stage("cv_editor", "in_progress")
+    set_stage("cover_letter_writer", "in_progress")
+    for index, job in enumerate(prioritized, start=1):
+        say(f"\n💼 Application {index}/{len(prioritized)} · {job['title']} — {job['company']} (match {job['score']:.1f})")
+        job_id = str(job["job_id"])
+
+        def save_cv(text: str, *, key: str = job_id) -> None:
+            cv_outputs[key] = {"text": text}
+            write_json(cv_editor_path, {
+                "version": 1,
+                "prompt_version": APPLICATION_PROMPT_VERSION,
+                "outputs": cv_outputs,
+            })
+
+        def save_letter(text: str, *, key: str = job_id) -> None:
+            cover_letter_outputs[key] = {"text": text}
+            write_json(cover_letter_path, {
+                "version": 1,
+                "prompt_version": APPLICATION_PROMPT_VERSION,
+                "outputs": cover_letter_outputs,
+            })
+
+        cv_record = cv_outputs.get(job_id, {})
+        letter_record = cover_letter_outputs.get(job_id, {})
+        cv_text = cv_record.get("text") if isinstance(cv_record, dict) else None
+        letter_text = letter_record.get("text") if isinstance(letter_record, dict) else None
+        if not isinstance(cv_text, str) or not cv_text.strip() or is_safety_metadata_only(cv_text):
+            cv_text = None
+        if (
+            not isinstance(letter_text, str)
+            or not letter_text.strip()
+            or is_safety_metadata_only(letter_text)
+        ):
+            letter_text = None
+        job.update(
+            generate_application_docs(
+                cv, job, candidate, output_dir / "applications", model, application_format,
+                github_url=github_url,
+                cv_text=cv_text, cover_letter_text=letter_text,
+                on_cv_generated=save_cv, on_cover_letter_generated=save_letter,
+            )
+        )
+        write_json(prioritized_path, prioritized)
+    cv_editor_data["outputs"] = cv_outputs
+    cv_editor_data["status"] = "complete"
+    cv_editor_data["prompt_version"] = APPLICATION_PROMPT_VERSION
+    cover_letter_data["outputs"] = cover_letter_outputs
+    cover_letter_data["status"] = "complete"
+    cover_letter_data["prompt_version"] = APPLICATION_PROMPT_VERSION
+    write_json(cv_editor_path, cv_editor_data)
+    write_json(cover_letter_path, cover_letter_data)
+    set_stage("cv_editor", "complete")
+    set_stage("cover_letter_writer", "complete")
+    set_stage("report", "in_progress")
+    say(f"\n📊 Summary Report Writer is building {', '.join(tracker_formats or ['html', 'csv']).upper()} tracker(s)…")
+    SummaryReportWriterAgent().write(
+        prioritized, output_dir, len(raw_jobs), tracker_formats,
+        tracker_html_filename, tracker_csv_filename,
+    )
+    set_stage("report", "complete")
+    if not prioritized:
+        say("   No roles met the configured filters and score threshold; tracker files still contain the run summary.")
+    say(f"\n🎉 All done. Results are in {output_dir.resolve()}")
+    return output_dir

@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import Mock, patch
+
+from docx import Document
+
+from talent_agent.documents import (
+    CVEditorAgent,
+    CoverLetterWriterAgent,
+    generate_application_docs,
+)
+
+
+class ApplicationDocumentTests(unittest.TestCase):
+    def test_agent_prompts_use_role_responsibilities_and_candidate_evidence(self) -> None:
+        job = {
+            "title": "Platform Engineer",
+            "company": "Example Ltd",
+            "location": "London",
+            "employment_type": "permanent",
+            "description": "Own Kubernetes platform reliability and improve observability.",
+        }
+        cv_agent = CVEditorAgent.__new__(CVEditorAgent)
+        cv_agent.agent = Mock()
+        cv_agent.agent.complete.return_value = "CV"
+        letter_agent = CoverLetterWriterAgent.__new__(CoverLetterWriterAgent)
+        letter_agent.agent = Mock()
+        letter_agent.agent.complete.return_value = "Letter"
+
+        cv_agent.create("Candidate operated Kubernetes clusters.", job)
+        letter_agent.create("Candidate operated Kubernetes clusters.", job, {})
+
+        cv_system, cv_prompt = cv_agent.agent.complete.call_args.args
+        _, letter_prompt = letter_agent.agent.complete.call_args.args
+        for prompt in (cv_prompt, letter_prompt):
+            self.assertIn("Own Kubernetes platform reliability", prompt)
+            self.assertIn("improve observability", prompt)
+            self.assertIn("Candidate operated Kubernetes clusters.", prompt)
+        self.assertIn("not merely its title", cv_system)
+        self.assertIn("not just the role title", letter_prompt)
+        self.assertIn("two or three important role needs", letter_prompt)
+
+    def test_documents_omit_template_labels_and_include_github_url(self) -> None:
+        github_url = "https://github.com/example-user"
+        cv_agent = Mock()
+        cv_agent.create.return_value = "# Nadeem Bhatti\n\n# Tailored CV\n\nPlatform engineer\n\n[Date]"
+        letter_agent = Mock()
+        letter_agent.create.return_value = (
+            "# Cover Letter — Example Ltd\n\nDear Hiring Manager,\n\n"
+            "I can contribute to the platform team.\n\nKind regards,\nNadeem\n\n[Date]"
+        )
+        job = {
+            "job_id": "role-1",
+            "company": "Example Ltd",
+            "title": "Platform Engineer",
+        }
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            directory = Path(temporary_dir)
+            with (
+                patch("talent_agent.documents.CVEditorAgent", return_value=cv_agent),
+                patch("talent_agent.documents.CoverLetterWriterAgent", return_value=letter_agent),
+            ):
+                documents = generate_application_docs(
+                    "Master CV", job, {}, directory, output_format="docx", github_url=github_url
+                )
+
+            cv_content = "\n".join(paragraph.text for paragraph in Document(directory / documents["cv_document"]).paragraphs)
+            letter_content = "\n".join(
+                paragraph.text for paragraph in Document(directory / documents["cover_letter_document"]).paragraphs
+            )
+
+        for content in (cv_content, letter_content):
+            self.assertNotIn("Tailored CV", content)
+            self.assertNotIn("Cover Letter", content)
+            self.assertNotIn("[Date]", content)
+            self.assertIn(github_url, content)
+
+        cv_agent.create.assert_called_once_with("Master CV", job, github_url)
+        letter_agent.create.assert_called_once_with("Master CV", job, {}, github_url)
+
+    def test_safety_metadata_only_checkpoint_is_not_written_as_a_document(self) -> None:
+        cv_agent = Mock()
+        cv_agent.create.return_value = "Nadeem Bhatti\nPlatform engineer"
+        letter_agent = Mock()
+        letter_agent.create.return_value = "Dear Hiring Manager,\n\nI am applying for this role."
+        job = {"job_id": "role-1", "company": "Example Ltd", "title": "Platform Engineer"}
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            directory = Path(temporary_dir)
+            with (
+                patch("talent_agent.documents.CVEditorAgent", return_value=cv_agent),
+                patch("talent_agent.documents.CoverLetterWriterAgent", return_value=letter_agent),
+            ):
+                documents = generate_application_docs(
+                    "Master CV",
+                    job,
+                    {},
+                    directory,
+                    output_format="docx",
+                    cv_text="User Safety: safe",
+                    cover_letter_text="User Safety: safe",
+                )
+
+            cv_content = "\n".join(
+                paragraph.text for paragraph in Document(directory / documents["cv_document"]).paragraphs
+            )
+            letter_content = "\n".join(
+                paragraph.text for paragraph in Document(directory / documents["cover_letter_document"]).paragraphs
+            )
+
+        self.assertIn("Platform engineer", cv_content)
+        self.assertIn("Dear Hiring Manager", letter_content)
+        cv_agent.create.assert_called_once()
+        letter_agent.create.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main()

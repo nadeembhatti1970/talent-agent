@@ -1,0 +1,13 @@
+[
+  {
+    "job_id": "example-001",
+    "title": "Senior Platform Engineer",
+    "company": "Example Technology",
+    "location": "London, UK",
+    "url": "https://example.com/jobs/platform-engineer",
+    "description": "We are seeking a senior platform engineer with AWS, Kubernetes, Terraform, and Python experience. The role partners with product teams to improve reliability and developer experience.",
+    "salary": "£85,000–£105,000",
+    "employment_type": "permanent",
+    "scraped_at": "2026-10-16T00:00:00Z"
+  }
+]

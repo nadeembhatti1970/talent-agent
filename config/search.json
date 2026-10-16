@@ -1,0 +1,23 @@
+{
+  "keywords": ["DEVOPS", "CLOUD ENGINEER", "PLATFORM ENGINEER", "AWS", "KUBERNETES", "DOCKER", "CI/CD", "SRE", "TERRAFORM", "SITE RELIABILITY ENGINEER"],
+  "locations": ["London, Rugby, Coventry, Birmingham, Solihull, Warwick, Stratford-upon-Avon, Leamington Spa, Kenilworth, Warwickshire, West Midlands"],
+  "github_profile_url": "https://github.com/nadeembhatti1970",
+  "date_posted": "past_week",
+  "max_results": 50,
+  "employment_types": ["contract", "permanent"],
+  "currency": "GBP",
+  "minimum_day_rate": 600,
+  "minimum_annual_salary": 150000,
+  "exclude_unknown_compensation": true,
+  "output": {
+    "root_dir": "outputs",
+    "dated_subfolders": true,
+    "date_format": "%Y-%m-%d",
+    "raw_jobs_filename": "raw_jobs.json",
+    "prioritized_jobs_filename": "prioritized_jobs.json",
+    "tracker_html_filename": "tracker.html",
+    "tracker_csv_filename": "tracker.csv",
+    "tracker_formats": ["html", "csv"],
+    "application_format": "docx"
+  }
+}
