@@ -54,6 +54,7 @@ class DocumentReviewerTests(unittest.TestCase):
             "master cv",
             {"title": "Platform Engineer", "company": "Example Ltd"},
             {"status": "available", "text": "LinkedIn evidence"},
+            github_url="https://github.com/example-user",
         )
 
         self.assertFalse(result["approved"])
@@ -62,6 +63,8 @@ class DocumentReviewerTests(unittest.TestCase):
         self.assertIn("master cv", prompt)
         self.assertIn("LinkedIn evidence", prompt)
         self.assertIn("Example Ltd", prompt)
+        self.assertIn("https://github.com/example-user", prompt)
+        self.assertIn("Treat this exact configured URL as authorized", prompt)
         self.assertTrue(agent.agent.complete.call_args.kwargs["json_output"])
 
 

@@ -10,7 +10,7 @@ import requests
 
 from .llm import OpenRouterAgent
 
-DOCUMENT_REVIEW_VERSION = 1
+DOCUMENT_REVIEW_VERSION = 2
 MAX_LINKEDIN_PROFILE_BYTES = 2_000_000
 MAX_LINKEDIN_PROFILE_TEXT = 12_000
 
@@ -160,6 +160,8 @@ class DocumentReviewerAgent:
         master_cv: str,
         job: dict[str, Any],
         linkedin_profile: dict[str, str],
+        *,
+        github_url: str = "",
     ) -> dict[str, Any]:
         linkedin_status = linkedin_profile.get("status", "unavailable")
         linkedin_text = linkedin_profile.get("text", "")
@@ -187,6 +189,10 @@ LINKEDIN PROFILE TEXT (supplementary evidence only; may be incomplete):
 {linkedin_text}
 </linkedin_profile>
 
+EXPLICITLY CONFIGURED CONTACT DETAIL:
+GitHub URL: {github_url or "not configured"}
+Treat this exact configured URL as authorized contact information, even if it is absent from the master CV.
+
 CV TO REVIEW:
 <generated_cv>
 {cv}
@@ -199,7 +205,7 @@ COVER LETTER TO REVIEW:
 
 Return exactly this JSON shape:
 {{"cv_findings": ["actionable issue"], "cover_letter_findings": ["actionable issue"], "summary": "brief result"}}
-Each findings array must be empty if its document passes. Flag unsupported or contradictory material claims, poor factual fidelity, generic content that does not connect responsibilities to evidence, and incorrect company/role references. Do not flag missing LinkedIn content when the profile is unavailable.""",
+Each findings array must be empty if its document passes. Flag unsupported or contradictory material claims, poor factual fidelity, generic content that does not connect responsibilities to evidence, and incorrect company/role references. Do not treat an omitted historical role as a factual error unless the omission materially misrepresents the candidate's experience. Do not flag missing LinkedIn content when the profile is unavailable.""",
             json_output=True,
         )
         result = json.loads(response)

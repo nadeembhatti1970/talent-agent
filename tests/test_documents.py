@@ -117,6 +117,68 @@ class ApplicationDocumentTests(unittest.TestCase):
         cv_agent.create.assert_called_once()
         letter_agent.create.assert_called_once()
 
+    def test_model_commentary_is_rejected_and_regenerated(self) -> None:
+        cv_agent = Mock()
+        cv_agent.create.side_effect = [
+            "The user wants me to create a CV.\nLet me analyze the role.",
+            "Nadeem Bhatti\nPlatform engineer with verified Kubernetes experience.",
+        ]
+        letter_agent = Mock()
+        letter_agent.create.return_value = "Dear Hiring Manager,\n\nI built Kubernetes platforms."
+        job = {"job_id": "role-1", "company": "Example Ltd", "title": "Platform Engineer"}
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            with (
+                patch("talent_agent.documents.CVEditorAgent", return_value=cv_agent),
+                patch("talent_agent.documents.CoverLetterWriterAgent", return_value=letter_agent),
+            ):
+                result = generate_application_docs(
+                    "Master CV", job, {}, Path(temporary_dir), output_format="md"
+                )
+
+            cv_content = (Path(temporary_dir) / result["cv_document"]).read_text()
+
+        self.assertTrue(cv_content.startswith("Nadeem Bhatti"))
+        self.assertNotIn("Let me analyze", cv_content)
+        self.assertEqual(cv_agent.create.call_count, 2)
+        self.assertIn("no analysis", cv_agent.create.call_args.args[3][-1])
+
+    def test_unapproved_review_does_not_write_application_documents(self) -> None:
+        cv_agent = Mock()
+        cv_agent.create.return_value = "Nadeem Bhatti\nPlatform engineer."
+        letter_agent = Mock()
+        letter_agent.create.return_value = "Dear Hiring Manager,\n\nI built platforms."
+        reviewer = Mock()
+        reviewer.review.return_value = {
+            "approved": False,
+            "cv_findings": [],
+            "cover_letter_findings": [],
+            "summary": "Unsupported claims remain.",
+        }
+        job = {"job_id": "role-1", "company": "Example Ltd", "title": "Platform Engineer"}
+        progress: list[dict[str, object]] = []
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            with (
+                patch("talent_agent.documents.CVEditorAgent", return_value=cv_agent),
+                patch("talent_agent.documents.CoverLetterWriterAgent", return_value=letter_agent),
+            ):
+                with self.assertRaisesRegex(ValueError, "did not approve.*Unsupported claims remain"):
+                    generate_application_docs(
+                        "Master CV",
+                        job,
+                        {},
+                        Path(temporary_dir),
+                        output_format="md",
+                        reviewer=reviewer,
+                        on_review_progress=lambda record: progress.append(dict(record)),
+                    )
+
+            self.assertEqual(list(Path(temporary_dir).glob("*.md")), [])
+
+        self.assertEqual(reviewer.review.call_count, 2)
+        self.assertEqual(progress[-1]["status"], "revision_pending")
+
     def test_reviewer_feedback_triggers_one_revision_and_a_final_review(self) -> None:
         cv_agent = Mock()
         cv_agent.create.side_effect = ["Initial CV", "Revised CV"]
