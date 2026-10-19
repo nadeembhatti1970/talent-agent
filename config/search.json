@@ -17,7 +17,7 @@
   "date_posted": "past_week",
   "max_results": 50,
   "employment_types": ["contract", "permanent"],
-  "workplace_arrangements": ["remote", "hybrid", "onsite"],
+  "workplace_arrangements": ["remote", "hybrid"],
   "currency": "GBP",
   "minimum_day_rate": 600,
   "minimum_annual_salary": 150000,

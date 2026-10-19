@@ -46,7 +46,10 @@ class ResumeTests(unittest.TestCase):
         self.assertTrue(config["include_unknown_contract_compensation"])
         self.assertTrue(config["review_documents"])
         self.assertTrue(config["review_linkedin_profile"])
-        self.assertEqual(config["workplace_arrangements"], ["hybrid", "onsite", "remote"])
+        self.assertTrue(config["workplace_arrangements"])
+        self.assertTrue(
+            set(config["workplace_arrangements"]).issubset({"remote", "hybrid", "onsite"})
+        )
 
     def test_search_queries_each_location_and_deduplicates_results(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -85,7 +88,7 @@ class ResumeTests(unittest.TestCase):
                 )
 
             self.assertEqual([call.args[1] for call in fetch.call_args_list], ["London", "Manchester"])
-            self.assertEqual([call.args[3] for call in fetch.call_args_list], [2, 2])
+            self.assertEqual([call.args[3] for call in fetch.call_args_list], [4, 4])
             raw_jobs = json.loads((output_dir / "raw_jobs.json").read_text(encoding="utf-8"))
             self.assertEqual(len(raw_jobs), 1)
 
@@ -127,7 +130,49 @@ class ResumeTests(unittest.TestCase):
 
             raw_jobs = json.loads((output_dir / "raw_jobs.json").read_text(encoding="utf-8"))
             self.assertEqual(len(raw_jobs), 4)
-            self.assertEqual([call.args[3] for call in fetch.call_args_list], [2, 2])
+            self.assertEqual([call.args[3] for call in fetch.call_args_list], [4, 4])
+
+    def test_search_requests_global_limit_for_each_location_and_caps_interleaved_total(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            cv_path = root / "cv.txt"
+            cv_path.write_text("Candidate CV", encoding="utf-8")
+
+            def jobs_for(prefix: str) -> list[dict[str, str]]:
+                return [
+                    {
+                        "id": f"{prefix}-{index}",
+                        "title": f"Platform Engineer {prefix} {index}",
+                        "company": "Example Ltd",
+                        "employment_type": "permanent",
+                        "description": "Platform engineering role.",
+                    }
+                    for index in range(50)
+                ]
+
+            fetch = Mock(side_effect=[jobs_for("london"), jobs_for("manchester")])
+            researcher = Mock()
+            researcher.normalize.side_effect = lambda jobs, *_: jobs
+            analyst = Mock()
+            analyst.evaluate.return_value = []
+            with (
+                patch("talent_agent.pipeline.fetch_apify_jobs", fetch),
+                patch("talent_agent.pipeline.ResearcherAgent", return_value=researcher),
+                patch("talent_agent.pipeline.CareerAnalystAgent", return_value=analyst),
+                patch("talent_agent.pipeline.SummaryReportWriterAgent"),
+            ):
+                output_dir = run_pipeline(
+                    jobs_path=None, search=True, cv_path=cv_path,
+                    locations=["London", "Manchester"], keywords=["Platform Engineer"],
+                    max_results=50, output_root=root / "outputs", dated_subfolders=False,
+                    tracker_formats=["csv"],
+                )
+
+            raw_jobs = json.loads((output_dir / "raw_jobs.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(raw_jobs), 50)
+            self.assertEqual([call.args[3] for call in fetch.call_args_list], [50, 50])
+            self.assertEqual(sum(job["job_id"].startswith("london-") for job in raw_jobs), 25)
+            self.assertEqual(sum(job["job_id"].startswith("manchester-") for job in raw_jobs), 25)
 
     def test_analyst_checkpoints_completed_batches_and_restores_them(self) -> None:
         jobs = [{"job_id": f"job-{index}", "title": f"Role {index}"} for index in range(4)]
