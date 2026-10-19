@@ -37,7 +37,9 @@ class CareerAnalystAgent:
                 continue
             evaluations[job_id] = {**evaluation, "score": round(score, 1)}
 
-        def score_batch(batch: list[dict[str, Any]], batch_label: str) -> None:
+        def score_batch(
+            batch: list[dict[str, Any]], batch_label: str, retry_missing: bool = True
+        ) -> None:
             pending_ids = {job["job_id"] for job in batch}
             compact_jobs = []
             for job in batch:
@@ -94,6 +96,31 @@ Jobs: {json.dumps(compact_jobs, ensure_ascii=False)}"""
             print(f"      ✓ Scored {batch_scored}/{len(batch)} roles in batch {batch_label}.", flush=True)
             if on_checkpoint:
                 on_checkpoint(list(evaluations.values()))
+            missing_jobs = [job for job in batch if job["job_id"] not in evaluations]
+            if missing_jobs:
+                missing_ids = sorted({job["job_id"] for job in missing_jobs})
+                if retry_missing and len(missing_jobs) == len(batch) and len(batch) > 1:
+                    midpoint = len(batch) // 2
+                    print(
+                        f"      ↻ Career Analyst omitted all requested job IDs in batch "
+                        f"{batch_label}; retrying as smaller requests.",
+                        flush=True,
+                    )
+                    score_batch(batch[:midpoint], f"{batch_label}a")
+                    score_batch(batch[midpoint:], f"{batch_label}b")
+                    return
+                if retry_missing:
+                    print(
+                        f"      ↻ Career Analyst omitted {len(missing_jobs)} assessment(s) "
+                        f"in batch {batch_label}; retrying those listings.",
+                        flush=True,
+                    )
+                    score_batch(missing_jobs, f"{batch_label}-retry", retry_missing=False)
+                    return
+                raise ValueError(
+                    "Career Analyst did not return valid assessments for job ID(s): "
+                    + ", ".join(missing_ids)
+                )
 
         for batch_index, batch in enumerate(batches, start=1):
             pending = [job for job in batch if job["job_id"] not in evaluations]

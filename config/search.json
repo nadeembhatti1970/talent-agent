@@ -20,7 +20,7 @@
   "workplace_arrangements": ["remote", "hybrid"],
   "currency": "GBP",
   "minimum_day_rate": 600,
-  "minimum_annual_salary": 140000,
+  "minimum_annual_salary": 120000,
   "exclude_unknown_compensation": true,
   "include_unknown_contract_compensation": true,
   "exclude_security_clearance": true,

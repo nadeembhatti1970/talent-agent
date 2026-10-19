@@ -274,6 +274,31 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(analyst.agent.complete.call_count, 3)
         self.assertEqual([len(checkpoint) for checkpoint in checkpoints], [1, 3])
 
+    def test_analyst_retries_jobs_omitted_from_response(self) -> None:
+        job = {"job_id": "contract-role", "title": "Contract Engineer"}
+        analyst = CareerAnalystAgent.__new__(CareerAnalystAgent)
+        analyst.agent = Mock()
+        analyst.agent.complete.side_effect = [
+            json.dumps([]),
+            json.dumps([{"job_id": job["job_id"], "score": 82}]),
+        ]
+
+        result = analyst.evaluate([job], "cv", {})
+
+        self.assertEqual([item["job_id"] for item in result], ["contract-role"])
+        self.assertEqual(analyst.agent.complete.call_count, 2)
+
+    def test_analyst_raises_when_retry_still_omits_job(self) -> None:
+        job = {"job_id": "contract-role", "title": "Contract Engineer"}
+        analyst = CareerAnalystAgent.__new__(CareerAnalystAgent)
+        analyst.agent = Mock()
+        analyst.agent.complete.return_value = json.dumps([])
+
+        with self.assertRaisesRegex(ValueError, "did not return valid assessments.*contract-role"):
+            analyst.evaluate([job], "cv", {})
+
+        self.assertEqual(analyst.agent.complete.call_count, 2)
+
     def test_resume_reuses_saved_agent_outputs_and_cli_accepts_resume(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             root = Path(temporary_dir)
