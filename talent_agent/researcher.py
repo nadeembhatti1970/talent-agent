@@ -117,7 +117,9 @@ class ResearcherAgent:
         return [job for job in normalized if job["job_id"] in kept_ids]
 
 
-def fetch_apify_jobs(keywords: str, location: str, date_posted: str, max_results: int) -> list[dict[str, Any]]:
+def fetch_apify_jobs(
+    keywords: str, location: str, date_posted: str, max_results: int | None
+) -> list[dict[str, Any]]:
     token = os.getenv("APIFY_API_TOKEN")
     if not token:
         raise RuntimeError("APIFY_API_TOKEN is required for --search; alternatively provide --jobs JSON.")
@@ -131,17 +133,21 @@ def fetch_apify_jobs(keywords: str, location: str, date_posted: str, max_results
         actor_id = f"{owner}~{actor_name}"
     endpoint = f"https://api.apify.com/v2/actors/{quote(actor_id, safe='~')}/run-sync-get-dataset-items"
     api_date = {"past_24_hours": "past24Hours", "past_week": "pastWeek"}.get(date_posted, "anyTime")
+    params = {"format": "json", "clean": "true"}
+    actor_input: dict[str, Any] = {
+        "keywords": keywords,
+        "location": location,
+        "datePosted": api_date,
+        "scrapeCompany": False,
+    }
+    if max_results is not None:
+        params.update({"limit": max_results, "maxItems": max_results})
+        actor_input["limitPerSource"] = max_results
     response = requests.post(
         endpoint,
-        params={"format": "json", "clean": "true", "limit": max_results, "maxItems": max_results},
+        params=params,
         headers={"Authorization": f"Bearer {token}"},
-        json={
-            "keywords": keywords,
-            "location": location,
-            "datePosted": api_date,
-            "limitPerSource": max_results,
-            "scrapeCompany": False,
-        },
+        json=actor_input,
         timeout=180,
     )
     if response.status_code == 404:

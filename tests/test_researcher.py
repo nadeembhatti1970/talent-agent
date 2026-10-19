@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from talent_agent.researcher import ResearcherAgent
+from talent_agent.researcher import ResearcherAgent, fetch_apify_jobs
 
 
 class ResearcherTests(unittest.TestCase):
@@ -45,6 +46,35 @@ class ResearcherTests(unittest.TestCase):
         )
         self.assertEqual(result[0]["description"], records[0]["description"].strip())
         self.assertLessEqual(len(reviewed_batches[0][0]["description"]), 1600)
+
+    def test_unlimited_apify_request_omits_result_limit_parameters(self) -> None:
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = [{"id": "job-1"}]
+        with (
+            patch.dict(os.environ, {"APIFY_API_TOKEN": "test-token", "APIFY_ACTOR_ID": "owner/actor"}),
+            patch("talent_agent.researcher.requests.post", return_value=response) as post,
+        ):
+            result = fetch_apify_jobs("Platform Engineer", "London", "past_week", None)
+
+        self.assertEqual(result, [{"id": "job-1"}])
+        self.assertNotIn("limit", post.call_args.kwargs["params"])
+        self.assertNotIn("maxItems", post.call_args.kwargs["params"])
+        self.assertNotIn("limitPerSource", post.call_args.kwargs["json"])
+
+    def test_limited_apify_request_passes_result_limit_parameters(self) -> None:
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = []
+        with (
+            patch.dict(os.environ, {"APIFY_API_TOKEN": "test-token", "APIFY_ACTOR_ID": "owner/actor"}),
+            patch("talent_agent.researcher.requests.post", return_value=response) as post,
+        ):
+            fetch_apify_jobs("Platform Engineer", "London", "past_week", 50)
+
+        self.assertEqual(post.call_args.kwargs["params"]["limit"], 50)
+        self.assertEqual(post.call_args.kwargs["params"]["maxItems"], 50)
+        self.assertEqual(post.call_args.kwargs["json"]["limitPerSource"], 50)
 
 
 if __name__ == "__main__":

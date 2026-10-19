@@ -116,8 +116,14 @@ def load_search_config(path: Path = DEFAULT_SEARCH_CONFIG) -> dict[str, Any]:
     config["employment_types"] = sorted(types)
     if config["date_posted"] not in {"past_24_hours", "past_week"}:
         raise ValueError("date_posted must be 'past_24_hours' or 'past_week'")
-    if int(config["max_results"]) < 1:
-        raise ValueError("max_results must be at least 1")
+    if config["max_results"] is not None:
+        max_results = config["max_results"]
+        if (
+            isinstance(max_results, bool)
+            or not isinstance(max_results, int)
+            or max_results < 1
+        ):
+            raise ValueError("max_results must be a positive integer or null")
     for key in ("minimum_day_rate", "minimum_annual_salary"):
         if config[key] is not None and float(config[key]) < 0:
             raise ValueError(f"{key} cannot be negative")

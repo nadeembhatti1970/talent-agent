@@ -26,7 +26,7 @@ def run_pipeline(
     resume_from: Path | None = None,
     candidate_path: Path | None = None, keywords: list[str] | None = None,
     location: str = "", locations: list[str] | None = None,
-    date_posted: str = "past_week", max_results: int = 50,
+    date_posted: str = "past_week", max_results: int | None = 50,
     minimum_score: float = 70.0,
     employment_types: list[str] | None = None, currency: str = "GBP",
     workplace_arrangements: list[str] | None = None,
@@ -123,17 +123,28 @@ def run_pipeline(
         if search:
             location_results: list[list[dict[str, Any]]] = []
             for search_location in search_locations:
+                limit_text = (
+                    f"up to {max_results} results"
+                    if max_results is not None
+                    else "without a configured result limit"
+                )
                 say(
                     f"\n🔎 Researcher is searching Apify for {', '.join(keywords or [])} "
-                    f"in {search_location or 'any location'} (up to {max_results} results)…"
+                    f"in {search_location or 'any location'} ({limit_text})…"
                 )
                 location_jobs = fetch_apify_jobs(
                     ", ".join(keywords or []), search_location, date_posted, max_results
                 )
-                location_results.append(location_jobs[:max_results])
+                location_results.append(
+                    location_jobs if max_results is None else location_jobs[:max_results]
+                )
             raw = [
                 jobs[index]
-                for index in range(max_results)
+                for index in range(
+                    max((len(jobs) for jobs in location_results), default=0)
+                    if max_results is None
+                    else max_results
+                )
                 for jobs in location_results
                 if index < len(jobs)
             ]
@@ -143,10 +154,10 @@ def run_pipeline(
             raw = json.loads(jobs_path.read_text(encoding="utf-8"))
             if not isinstance(raw, list) or not all(isinstance(item, dict) for item in raw):
                 raise ValueError("Jobs input must be a JSON array of objects")
-        if not search and len(raw) > max_results:
+        if max_results is not None and not search and len(raw) > max_results:
             raw = raw[:max_results]
         raw_jobs = normalize_jobs(raw)
-        if len(raw_jobs) > max_results:
+        if max_results is not None and len(raw_jobs) > max_results:
             raw_jobs = raw_jobs[:max_results]
         raw_path = output_dir / raw_jobs_filename
         write_json(raw_path, raw_jobs)
