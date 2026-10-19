@@ -48,33 +48,83 @@ class ResearcherTests(unittest.TestCase):
         self.assertLessEqual(len(reviewed_batches[0][0]["description"]), 1600)
 
     def test_unlimited_apify_request_omits_result_limit_parameters(self) -> None:
-        response = Mock()
-        response.status_code = 200
-        response.json.return_value = [{"id": "job-1"}]
+        run_response = Mock()
+        run_response.status_code = 201
+        run_response.json.return_value = {
+            "data": {
+                "id": "run-1",
+                "status": "SUCCEEDED",
+                "defaultDatasetId": "dataset-1",
+            }
+        }
+        dataset_response = Mock()
+        dataset_response.json.return_value = [{"id": "job-1"}]
         with (
             patch.dict(os.environ, {"APIFY_API_TOKEN": "test-token", "APIFY_ACTOR_ID": "owner/actor"}),
-            patch("talent_agent.researcher.requests.post", return_value=response) as post,
+            patch("talent_agent.researcher.requests.post", return_value=run_response) as post,
+            patch("talent_agent.researcher.requests.get", return_value=dataset_response) as get,
         ):
             result = fetch_apify_jobs("Platform Engineer", "London", "past_week", None)
 
         self.assertEqual(result, [{"id": "job-1"}])
-        self.assertNotIn("limit", post.call_args.kwargs["params"])
-        self.assertNotIn("maxItems", post.call_args.kwargs["params"])
+        self.assertTrue(post.call_args.args[0].endswith("/acts/owner~actor/runs"))
         self.assertNotIn("limitPerSource", post.call_args.kwargs["json"])
+        self.assertNotIn("limit", get.call_args.kwargs["params"])
 
     def test_limited_apify_request_passes_result_limit_parameters(self) -> None:
-        response = Mock()
-        response.status_code = 200
-        response.json.return_value = []
+        run_response = Mock()
+        run_response.status_code = 201
+        run_response.json.return_value = {
+            "data": {
+                "id": "run-1",
+                "status": "SUCCEEDED",
+                "defaultDatasetId": "dataset-1",
+            }
+        }
+        dataset_response = Mock()
+        dataset_response.json.return_value = []
         with (
             patch.dict(os.environ, {"APIFY_API_TOKEN": "test-token", "APIFY_ACTOR_ID": "owner/actor"}),
-            patch("talent_agent.researcher.requests.post", return_value=response) as post,
+            patch("talent_agent.researcher.requests.post", return_value=run_response) as post,
+            patch("talent_agent.researcher.requests.get", return_value=dataset_response) as get,
         ):
             fetch_apify_jobs("Platform Engineer", "London", "past_week", 50)
 
-        self.assertEqual(post.call_args.kwargs["params"]["limit"], 50)
-        self.assertEqual(post.call_args.kwargs["params"]["maxItems"], 50)
         self.assertEqual(post.call_args.kwargs["json"]["limitPerSource"], 50)
+        self.assertEqual(get.call_args.kwargs["params"]["limit"], 50)
+
+    def test_apify_run_is_polled_until_completion_before_loading_dataset(self) -> None:
+        run_response = Mock()
+        run_response.status_code = 201
+        run_response.json.return_value = {
+            "data": {"id": "run-1", "status": "RUNNING"}
+        }
+        running_response = Mock()
+        running_response.json.return_value = {"data": {"id": "run-1", "status": "RUNNING"}}
+        completed_response = Mock()
+        completed_response.json.return_value = {
+            "data": {
+                "id": "run-1",
+                "status": "SUCCEEDED",
+                "defaultDatasetId": "dataset-1",
+            }
+        }
+        dataset_response = Mock()
+        dataset_response.json.return_value = [{"id": "job-1"}]
+        with (
+            patch.dict(os.environ, {"APIFY_API_TOKEN": "test-token", "APIFY_ACTOR_ID": "owner/actor"}),
+            patch("talent_agent.researcher.requests.post", return_value=run_response),
+            patch(
+                "talent_agent.researcher.requests.get",
+                side_effect=[running_response, completed_response, dataset_response],
+            ) as get,
+            patch("talent_agent.researcher.time.sleep") as sleep,
+        ):
+            result = fetch_apify_jobs("Platform Engineer", "London", "past_week", None)
+
+        self.assertEqual(result, [{"id": "job-1"}])
+        self.assertEqual(get.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
 
 
 if __name__ == "__main__":

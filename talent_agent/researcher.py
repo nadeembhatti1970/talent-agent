@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
@@ -131,9 +132,8 @@ def fetch_apify_jobs(
     if "/" in actor_id and "~" not in actor_id:
         owner, actor_name = actor_id.split("/", 1)
         actor_id = f"{owner}~{actor_name}"
-    endpoint = f"https://api.apify.com/v2/actors/{quote(actor_id, safe='~')}/run-sync-get-dataset-items"
+    endpoint = f"https://api.apify.com/v2/acts/{quote(actor_id, safe='~')}/runs"
     api_date = {"past_24_hours": "past24Hours", "past_week": "pastWeek"}.get(date_posted, "anyTime")
-    params = {"format": "json", "clean": "true"}
     actor_input: dict[str, Any] = {
         "keywords": keywords,
         "location": location,
@@ -141,21 +141,62 @@ def fetch_apify_jobs(
         "scrapeCompany": False,
     }
     if max_results is not None:
-        params.update({"limit": max_results, "maxItems": max_results})
         actor_input["limitPerSource"] = max_results
     response = requests.post(
         endpoint,
-        params=params,
         headers={"Authorization": f"Bearer {token}"},
         json=actor_input,
-        timeout=180,
+        timeout=(10, 30),
     )
     if response.status_code == 404:
         raise RuntimeError(f"Apify returned 404 for actor '{actor_id}'. Check that APIFY_ACTOR_ID names an actor available to your account.")
     if response.status_code in (401, 403):
         raise RuntimeError(f"Apify rejected the credentials (HTTP {response.status_code}). Check the rotated APIFY_API_TOKEN and actor access.")
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
-        raise ValueError("Apify actor returned an unexpected payload; expected a JSON array")
+    run_payload = response.json()
+    if not isinstance(run_payload, dict) or not isinstance(run_payload.get("data"), dict):
+        raise ValueError("Apify returned an unexpected actor-run response; expected a data object")
+    run_data = run_payload["data"]
+    run_id = run_data.get("id")
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError("Apify actor-run response did not include a run ID")
+    status = run_data.get("status")
+    while status not in {"SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"}:
+        if status not in {"READY", "RUNNING", "ABORTING"}:
+            raise ValueError(f"Apify returned an unexpected actor-run status: {status!r}")
+        time.sleep(5)
+        status_response = requests.get(
+            f"https://api.apify.com/v2/actor-runs/{quote(run_id, safe='')}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=(10, 30),
+        )
+        status_response.raise_for_status()
+        status_payload = status_response.json()
+        if not isinstance(status_payload, dict) or not isinstance(status_payload.get("data"), dict):
+            raise ValueError("Apify returned an unexpected actor-run status response")
+        run_data = status_payload["data"]
+        status = run_data.get("status")
+    if status != "SUCCEEDED":
+        message = run_data.get("statusMessage") or "no failure details provided"
+        raise RuntimeError(f"Apify actor run {run_id} ended with status {status}: {message}")
+
+    dataset_id = run_data.get("defaultDatasetId")
+    if not isinstance(dataset_id, str) or not dataset_id:
+        raise ValueError(f"Apify actor run {run_id} completed without a default dataset ID")
+    dataset_params = {"format": "json", "clean": "true"}
+    if max_results is not None:
+        dataset_params["limit"] = max_results
+    dataset_response = requests.get(
+        f"https://api.apify.com/v2/datasets/{quote(dataset_id, safe='')}/items",
+        params=dataset_params,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=(10, 300),
+    )
+    dataset_response.raise_for_status()
+    payload = dataset_response.json()
+    if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
+        raise ValueError(
+            "Apify dataset endpoint returned an unexpected payload; "
+            "expected a JSON array of objects"
+        )
     return payload
