@@ -28,7 +28,7 @@ All pipeline executions follow a strict chronological directory schema to ensure
   * Execute targeted searches based on keywords, geographic locations, and employment parameters.
   * Ingest and normalize raw job posting payloads.
   * Filter out duplicate postings or expired listings.
-* **Inputs:** Search query criteria, location parameters, target compensation thresholds.
+* **Inputs:** Search query criteria, location parameters, workplace arrangement options (remote, hybrid/partly remote, and onsite), target compensation thresholds.
 * **Outputs:** `outputs/YYYY-MM-DD/raw_jobs.json`, `agent_outputs/researcher.json`
 
 ### 2. The Career Analyst Agent

@@ -9,6 +9,7 @@ from .settings import GITHUB_PROFILE_URL, PROJECT_ROOT
 
 DEFAULT_SEARCH_CONFIG = PROJECT_ROOT / "config" / "search.json"
 ALLOWED_EMPLOYMENT_TYPES = {"contract", "permanent"}
+ALLOWED_WORKPLACE_ARRANGEMENTS = {"remote", "hybrid", "onsite"}
 DEFAULT_OUTPUT_CONFIG = {
     "root_dir": "outputs",
     "dated_subfolders": True,
@@ -44,6 +45,28 @@ def load_search_config(path: Path = DEFAULT_SEARCH_CONFIG) -> dict[str, Any]:
     config.setdefault("date_posted", "past_week")
     config.setdefault("max_results", 50)
     config.setdefault("employment_types", ["contract", "permanent"])
+    config.setdefault("workplace_arrangements", sorted(ALLOWED_WORKPLACE_ARRANGEMENTS))
+    if not isinstance(config["workplace_arrangements"], list):
+        raise ValueError("Search config 'workplace_arrangements' must be an array")
+    arrangement_aliases = {
+        "partly remote": "hybrid",
+        "partly-remote": "hybrid",
+        "partly_remote": "hybrid",
+        "on-site": "onsite",
+    }
+    arrangements = {
+        arrangement_aliases.get(str(value).strip().lower(), str(value).strip().lower())
+        for value in config["workplace_arrangements"]
+    }
+    invalid_arrangements = arrangements - ALLOWED_WORKPLACE_ARRANGEMENTS
+    if invalid_arrangements:
+        raise ValueError(
+            "workplace_arrangements may contain only 'remote', 'hybrid' (partly remote), "
+            "and/or 'onsite'"
+        )
+    if not arrangements:
+        raise ValueError("Select at least one workplace arrangement")
+    config["workplace_arrangements"] = sorted(arrangements)
     config.setdefault("currency", "GBP")
     config.setdefault("minimum_day_rate", None)
     config.setdefault("minimum_annual_salary", None)

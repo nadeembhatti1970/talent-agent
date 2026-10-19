@@ -13,11 +13,12 @@ This document defines the atomic operational skills, tool integrations, and data
   {
     "search_keywords": "string",
     "locations": ["string"],
+    "workplace_arrangements": ["remote | hybrid | onsite"],
     "date_posted": "past_24_hours | past_week",
     "max_results": 50
   }
   ```
-* **Output Standard:** Search each configured location independently, combine and deduplicate results, and write a normalized JSON array containing `job_id`, `title`, `company`, `location`, `url`, `description`, and `scraped_at`.
+* **Output Standard:** Search each configured location independently, combine and deduplicate results, apply the selected workplace arrangements (remote, hybrid/partly remote, and/or onsite), and write a normalized JSON array containing `job_id`, `title`, `company`, `location`, `workplace_arrangement`, `url`, `description`, and `scraped_at`.
 
 ### 2. Candidate Alignment & Evaluation (Career Analyst Skill)
 * **Tool Integration:** Local File Reader & LLM Text Analysis

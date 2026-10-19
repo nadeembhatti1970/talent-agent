@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 import requests
 
+from .filters import classify_workplace_arrangement
 from .llm import OpenRouterAgent
 
 
@@ -37,6 +38,7 @@ def normalize_jobs(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "description": description,
             "salary": item.get("salary") or item.get("salaryRange") or item.get("salaryInfo") or item.get("salaryInsights") or "Not specified",
             "employment_type": employment_type,
+            "workplace_arrangement": classify_workplace_arrangement(item),
             "scraped_at": str(item.get("scraped_at") or datetime.now(timezone.utc).isoformat()),
         })
     return jobs

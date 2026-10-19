@@ -29,6 +29,7 @@ def run_pipeline(
     date_posted: str = "past_week", max_results: int = 50,
     minimum_score: float = 70.0,
     employment_types: list[str] | None = None, currency: str = "GBP",
+    workplace_arrangements: list[str] | None = None,
     minimum_day_rate: float | None = None, minimum_annual_salary: float | None = None,
     exclude_unknown_compensation: bool = False, exclude_security_clearance: bool = False,
     linkedin_url: str = "", github_url: str = "",
@@ -76,6 +77,7 @@ def run_pipeline(
         candidate["minimum_annual_salary"] = minimum_annual_salary
     candidate["currency"] = currency
     candidate["employment_types"] = employment_types or ["contract", "permanent"]
+    candidate["workplace_arrangements"] = workplace_arrangements or ["hybrid", "onsite", "remote"]
     state_path: Path | None = None
     if resume_from is not None:
         output_dir = resume_from.expanduser().resolve()
@@ -355,6 +357,7 @@ def run_pipeline(
     say(f"   {len(relevant_jobs)} listing(s) passed the relevance review.")
     filter_config = {
         "employment_types": employment_types or ["contract", "permanent"],
+        "workplace_arrangements": workplace_arrangements or ["hybrid", "onsite", "remote"],
         "minimum_day_rate": minimum_day_rate,
         "minimum_annual_salary": minimum_annual_salary,
         "exclude_unknown_compensation": exclude_unknown_compensation,

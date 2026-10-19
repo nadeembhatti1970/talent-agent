@@ -25,6 +25,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--keywords", action="append", help="Search phrase; repeat to override file keywords")
     run.add_argument("--location", action="append", help="Target job location; repeat to search multiple locations (overrides config file)")
     run.add_argument("--employment-type", choices=("contract", "permanent"), action="append", help="Allowed type; repeat for both (overrides config)")
+    run.add_argument(
+        "--workplace-arrangement",
+        choices=("remote", "hybrid", "partly-remote", "onsite"),
+        action="append",
+        help="Allowed workplace arrangement; repeat for multiple (hybrid and partly-remote are equivalent; overrides config)",
+    )
     run.add_argument("--date-posted", choices=("past_24_hours", "past_week"))
     run.add_argument("--max-results", type=int)
     run.add_argument("--minimum-score", type=float, default=70.0)
@@ -82,6 +88,11 @@ def main() -> int:
             else config.get("github_profile_url") or GITHUB_PROFILE_URL
         )
         employment_types = args.employment_type if args.employment_type is not None else config["employment_types"]
+        workplace_arrangements = (
+            ["hybrid" if value == "partly-remote" else value for value in args.workplace_arrangement]
+            if args.workplace_arrangement is not None
+            else config["workplace_arrangements"]
+        )
         exclude_unknown = args.exclude_unknown_compensation if args.exclude_unknown_compensation is not None else config["exclude_unknown_compensation"]
         exclude_security_clearance = (
             args.exclude_security_clearance
@@ -103,6 +114,7 @@ def main() -> int:
             keywords=keywords, locations=locations, date_posted=args.date_posted or config["date_posted"],
             max_results=args.max_results if args.max_results is not None else config["max_results"], minimum_score=args.minimum_score,
             employment_types=employment_types, currency=args.currency or config["currency"],
+            workplace_arrangements=workplace_arrangements,
             minimum_day_rate=args.min_day_rate if args.min_day_rate is not None else config["minimum_day_rate"],
             minimum_annual_salary=args.min_annual_salary if args.min_annual_salary is not None else config["minimum_annual_salary"],
             exclude_unknown_compensation=exclude_unknown,

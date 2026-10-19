@@ -35,13 +35,69 @@ _CLEARANCE_REQUIRED_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+_WORKPLACE_ARRANGEMENTS = {"remote", "hybrid", "onsite"}
+
+
+def classify_workplace_arrangement(job: dict[str, Any]) -> str:
+    explicit_fields = (
+        "workplace_arrangement",
+        "workplace_type",
+        "workplaceType",
+        "remote_type",
+        "remoteType",
+        "work_location_type",
+        "workLocationType",
+    )
+    for field in explicit_fields:
+        value = str(job.get(field, "")).strip()
+        if value:
+            arrangement = _arrangement_from_text(value)
+            if arrangement:
+                return arrangement
+
+    return _arrangement_from_text(
+        "\n".join(
+            str(job.get(field, ""))
+            for field in ("title", "location", "description")
+            if job.get(field)
+        )
+    ) or "unknown"
+
+
+def _arrangement_from_text(value: str) -> str | None:
+    text = value.lower().replace("_", " ").replace("-", " ")
+    hybrid = any(
+        term in text
+        for term in ("hybrid", "partly remote", "part remote", "partially remote")
+    )
+    remote = any(
+        term in text
+        for term in ("remote", "work from home", "home based", "fully home based")
+    )
+    onsite = any(
+        term in text
+        for term in ("onsite", "on site", "office based")
+    )
+    if hybrid or (remote and onsite):
+        return "hybrid"
+    if remote:
+        return "remote"
+    if onsite:
+        return "onsite"
+    return None
 
 
 def filter_jobs(jobs: list[dict[str, Any]], config: dict[str, Any]) -> list[dict[str, Any]]:
     allowed_types = set(config["employment_types"])
+    allowed_arrangements = set(config.get("workplace_arrangements", _WORKPLACE_ARRANGEMENTS))
     filtered: list[dict[str, Any]] = []
     for job in jobs:
         if config.get("exclude_security_clearance", False) and _requires_security_clearance(job):
+            continue
+        arrangement = classify_workplace_arrangement(job)
+        if arrangement in _WORKPLACE_ARRANGEMENTS and arrangement not in allowed_arrangements:
+            continue
+        if arrangement == "unknown" and len(allowed_arrangements) < len(_WORKPLACE_ARRANGEMENTS):
             continue
         kind = str(job.get("employment_type", "unknown")).lower()
         # Unknown types remain eligible when both categories are selected; a single-category

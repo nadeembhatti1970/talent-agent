@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import unittest
 
-from talent_agent.filters import filter_jobs
+from talent_agent.filters import classify_workplace_arrangement, filter_jobs
+from talent_agent.researcher import normalize_jobs
 
 
 class FilterJobsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config = {
             "employment_types": ["contract", "permanent"],
+            "workplace_arrangements": ["remote", "hybrid", "onsite"],
             "minimum_day_rate": 600,
             "minimum_annual_salary": 150000,
             "exclude_unknown_compensation": True,
@@ -96,6 +98,47 @@ class FilterJobsTests(unittest.TestCase):
         }
 
         self.assertEqual(filter_jobs([job], config), [job])
+
+    def test_workplace_arrangements_filter_remote_hybrid_and_onsite_roles(self) -> None:
+        jobs = [
+            {"job_id": "remote", "workplace_arrangement": "remote"},
+            {"job_id": "hybrid", "workplace_arrangement": "Hybrid"},
+            {"job_id": "onsite", "workplace_arrangement": "On-site"},
+            {"job_id": "unknown", "workplace_arrangement": "unknown"},
+        ]
+        config = {**self.config, "workplace_arrangements": ["remote", "hybrid"]}
+
+        self.assertEqual(
+            [job["job_id"] for job in filter_jobs(jobs, config)],
+            ["remote", "hybrid"],
+        )
+
+    def test_classifies_workplace_type_and_text_fallback(self) -> None:
+        jobs = [
+            {"job_id": "explicit", "workplaceType": "On-site", "description": "Remote optional."},
+            {"job_id": "partly-remote", "description": "This is a partly remote role."},
+            {"job_id": "remote", "location": "Remote"},
+            {"job_id": "unknown", "description": "Flexible working environment."},
+        ]
+        config = {**self.config, "workplace_arrangements": ["remote", "hybrid", "onsite"]}
+
+        self.assertEqual(
+            [classify_workplace_arrangement(job) for job in filter_jobs(jobs, config)],
+            ["onsite", "hybrid", "remote", "unknown"],
+        )
+
+    def test_normalized_job_records_include_workplace_arrangement(self) -> None:
+        jobs = normalize_jobs([
+            {
+                "id": "hybrid-job",
+                "title": "Platform Engineer",
+                "company": "Example Ltd",
+                "workplaceType": "Hybrid",
+                "description": "Support cloud infrastructure.",
+            }
+        ])
+
+        self.assertEqual(jobs[0]["workplace_arrangement"], "hybrid")
 
 
 if __name__ == "__main__":
