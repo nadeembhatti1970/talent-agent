@@ -22,6 +22,8 @@ class ResumeTests(unittest.TestCase):
                     "locations": ["London", "Manchester"],
                     "github_profile_url": "https://github.com/example-user",
                     "exclude_security_clearance": True,
+                    "review_documents": True,
+                    "review_linkedin_profile": True,
                 }),
                 encoding="utf-8",
             )
@@ -29,6 +31,8 @@ class ResumeTests(unittest.TestCase):
             self.assertEqual(config["locations"], ["London", "Manchester"])
             self.assertEqual(config["github_profile_url"], "https://github.com/example-user")
             self.assertTrue(config["exclude_security_clearance"])
+            self.assertTrue(config["review_documents"])
+            self.assertTrue(config["review_linkedin_profile"])
 
             config_path.write_text(json.dumps({"location": "London"}), encoding="utf-8")
             self.assertEqual(load_search_config(config_path)["locations"], ["London"])
@@ -38,6 +42,8 @@ class ResumeTests(unittest.TestCase):
 
         self.assertGreater(len(config["locations"]), 1)
         self.assertTrue(config["include_unknown_contract_compensation"])
+        self.assertTrue(config["review_documents"])
+        self.assertTrue(config["review_linkedin_profile"])
 
     def test_search_queries_each_location_and_deduplicates_results(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -207,7 +213,7 @@ class ResumeTests(unittest.TestCase):
                 run_pipeline(
                     jobs_path=jobs_path, search=False, cv_path=cv_path,
                     output_root=output_dir, dated_subfolders=False,
-                    tracker_formats=["csv"], application_format="md",
+                    tracker_formats=["csv"], application_format="md", review_documents=False,
                 )
 
             memory_dir = output_dir / "agent_outputs"
@@ -229,6 +235,7 @@ class ResumeTests(unittest.TestCase):
                     dated_subfolders=False,
                     tracker_formats=["html"],
                     application_format="docx",
+                    review_documents=False,
                 )
                 openrouter.return_value.complete.assert_not_called()
 
@@ -250,6 +257,7 @@ class ResumeTests(unittest.TestCase):
                     jobs_path=None, search=False, resume_from=output_dir, cv_path=cv_path,
                     output_root=root / "unused", dated_subfolders=False,
                     tracker_formats=["html"], application_format="docx",
+                    review_documents=False,
                 )
                 openrouter.return_value.complete.assert_not_called()
                 cv_editor.return_value.create.assert_called_once()
@@ -274,6 +282,7 @@ class ResumeTests(unittest.TestCase):
                     output_root=root / "unused", dated_subfolders=False,
                     tracker_formats=["html"], application_format="docx",
                     github_url="https://github.com/updated-profile",
+                    review_documents=False,
                 )
                 openrouter.return_value.complete.assert_called_once()
                 cv_editor.return_value.create.assert_called_once()
@@ -288,6 +297,91 @@ class ResumeTests(unittest.TestCase):
                 "run", "--search", "--location", "London", "--location", "Manchester"
             ])
             self.assertEqual(search_args.location, ["London", "Manchester"])
+
+    def test_reviewer_output_is_checkpointed_and_reused_on_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            cv_path = root / "cv.txt"
+            cv_path.write_text("Candidate CV with Kubernetes experience.", encoding="utf-8")
+            jobs_path = root / "jobs.json"
+            jobs_path.write_text(
+                json.dumps([{
+                    "id": "role-1",
+                    "title": "Platform Engineer",
+                    "company": "Example Ltd",
+                    "location": "London",
+                    "employment_type": "permanent",
+                    "description": "Improve Kubernetes platform reliability.",
+                }]),
+                encoding="utf-8",
+            )
+            output_dir = root / "outputs"
+            researcher = Mock()
+            researcher.normalize.side_effect = lambda jobs, *_: jobs
+            review = {
+                "approved": True,
+                "cv_findings": [],
+                "cover_letter_findings": [],
+                "summary": "Documents are role-specific and factually supported.",
+                "linkedin_status": "disabled",
+                "linkedin_note": "LinkedIn profile fetching is disabled.",
+            }
+
+            with (
+                patch("talent_agent.pipeline.ResearcherAgent", return_value=researcher),
+                patch("talent_agent.analyst.OpenRouterAgent") as openrouter,
+                patch("talent_agent.documents.CVEditorAgent") as cv_editor,
+                patch("talent_agent.documents.CoverLetterWriterAgent") as letter_writer,
+                patch("talent_agent.pipeline.DocumentReviewerAgent") as reviewer,
+                patch("talent_agent.pipeline.SummaryReportWriterAgent"),
+            ):
+                openrouter.return_value.complete.return_value = json.dumps([{
+                    "job_id": "role-1",
+                    "score": 85,
+                    "rationale": "Relevant Kubernetes experience.",
+                    "missing_requirements": [],
+                }])
+                cv_editor.return_value.create.return_value = "Platform engineer with Kubernetes experience."
+                letter_writer.return_value.create.return_value = "I can improve platform reliability."
+                reviewer.return_value.review.return_value = review
+                run_pipeline(
+                    jobs_path=jobs_path,
+                    search=False,
+                    cv_path=cv_path,
+                    output_root=output_dir,
+                    dated_subfolders=False,
+                    tracker_formats=["csv"],
+                    application_format="md",
+                    review_documents=True,
+                    review_linkedin_profile=False,
+                )
+                reviewer.return_value.review.assert_called_once()
+
+            checkpoint_path = output_dir / "agent_outputs" / "document_reviewer.json"
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            self.assertEqual(checkpoint["outputs"]["role-1"]["status"], "complete")
+            self.assertTrue(checkpoint["outputs"]["role-1"]["final_report"]["approved"])
+            prioritized = json.loads((output_dir / "prioritized_jobs.json").read_text(encoding="utf-8"))
+            self.assertTrue(prioritized[0]["document_review"]["approved"])
+
+            with (
+                patch("talent_agent.pipeline.ResearcherAgent", side_effect=AssertionError("Researcher reran")),
+                patch("talent_agent.analyst.OpenRouterAgent"),
+                patch("talent_agent.documents.CVEditorAgent", side_effect=AssertionError("CV Editor reran")),
+                patch("talent_agent.documents.CoverLetterWriterAgent", side_effect=AssertionError("Letter Writer reran")),
+                patch("talent_agent.pipeline.DocumentReviewerAgent", side_effect=AssertionError("Reviewer reran")),
+                patch("talent_agent.pipeline.SummaryReportWriterAgent"),
+            ):
+                run_pipeline(
+                    jobs_path=None,
+                    search=False,
+                    resume_from=output_dir,
+                    cv_path=cv_path,
+                    tracker_formats=["csv"],
+                    application_format="md",
+                    review_documents=True,
+                    review_linkedin_profile=False,
+                )
 
 
 if __name__ == "__main__":

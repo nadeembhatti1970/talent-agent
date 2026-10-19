@@ -18,15 +18,30 @@ class SummaryReportWriterAgent:
         formats = formats or ["html", "csv"]
         rows = []
         for job in jobs:
+            review = job.get("document_review", {})
+            if not isinstance(review, dict):
+                review = {}
+            findings = review.get("cv_findings", []) + review.get("cover_letter_findings", [])
             rows.append({
                 "score": job.get("score", ""), "title": job.get("title", ""),
                 "company": job.get("company", ""), "location": job.get("location", ""),
                 "salary": job.get("salary", ""), "url": job.get("url", ""),
                 "cv_document": job.get("cv_document", ""),
                 "cover_letter_document": job.get("cover_letter_document", ""),
+                "review_status": (
+                    "Approved" if review.get("approved") is True
+                    else "Needs attention" if review.get("approved") is False
+                    else ""
+                ),
+                "linkedin_verification": review.get("linkedin_status", ""),
+                "review_findings": " | ".join(str(item) for item in findings),
                 "rationale": job.get("rationale", ""),
             })
-        frame = pd.DataFrame(rows, columns=["score", "title", "company", "location", "salary", "url", "cv_document", "cover_letter_document", "rationale"])
+        frame = pd.DataFrame(rows, columns=[
+            "score", "title", "company", "location", "salary", "url",
+            "cv_document", "cover_letter_document", "review_status",
+            "linkedin_verification", "review_findings", "rationale",
+        ])
         if "csv" in formats:
             frame.to_csv(directory / csv_filename, index=False)
         escaped = frame.copy()

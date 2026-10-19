@@ -23,6 +23,8 @@
   "exclude_unknown_compensation": true,
   "include_unknown_contract_compensation": true,
   "exclude_security_clearance": true,
+  "review_documents": true,
+  "review_linkedin_profile": true,
   "output": {
     "root_dir": "outputs",
     "dated_subfolders": true,

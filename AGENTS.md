@@ -34,7 +34,7 @@ All pipeline executions follow a strict chronological directory schema to ensure
 ### 2. The Career Analyst Agent
 * **Role & Objective:** Acts as the qualification and compensation gatekeeper. Evaluates raw job listings against the candidate's actual background.
 * **Core Responsibilities:**
-  * Parse baseline candidate assets from the local filesystem (Master CV) and live URL (LinkedIn Profile).
+  * Parse baseline candidate assets from the local filesystem (Master CV) and optional public LinkedIn profile text.
   * Calculate an alignment score ($0.0\% - 100.0\%$) based on tech stack overlap, seniority alignment, and compensation expectations.
   * Rank and filter listings, discarding roles that fall below the minimum threshold.
 * **Inputs:** `outputs/YYYY-MM-DD/raw_jobs.json`, Local Master CV file, Candidate LinkedIn profile URL.
@@ -58,7 +58,17 @@ All pipeline executions follow a strict chronological directory schema to ensure
 * **Inputs:** Selected job records from `prioritized_jobs.json`, Candidate profile summary.
 * **Outputs:** `outputs/YYYY-MM-DD/applications/[Company]_[JobTitle]_CoverLetter.docx`, `agent_outputs/cover_letter_writer.json`
 
-### 5. The Summary Report Writer Agent
+### 5. The Document Reviewer Agent
+* **Role & Objective:** Quality-check each CV and cover letter for alignment with the role's actual responsibilities and hiring company, and for factual support.
+* **Core Responsibilities:**
+  * Check material claims against the original Master CV and, when accessible, public LinkedIn profile text. Treat the Master CV as authoritative and flag contradictions or unsupported claims; do not infer falsity from missing profile data.
+  * Check role and client alignment beyond the job title and identify generic or mismatched content.
+  * Return structured findings, request at most one document revision, and re-review the revised drafts.
+  * Record whether LinkedIn content was available; never bypass sign-in or other access controls.
+* **Inputs:** Master CV, selected job listing, generated CV and cover letter, optional fetched public LinkedIn profile.
+* **Outputs:** `agent_outputs/document_reviewer.json`, final review status/findings in the job tracker.
+
+### 6. The Summary Report Writer Agent
 * **Role & Objective:** Acts as the reporting and dashboard compiler. Integrates all generated artifacts into an easily navigable control center.
 * **Core Responsibilities:**
   * Aggregate metrics and file paths into a structured summary.
@@ -69,6 +79,7 @@ All pipeline executions follow a strict chronological directory schema to ensure
 ### Durable Agent Outputs
 * Save each agent's usable output as JSON under `outputs/YYYY-MM-DD/agent_outputs/`.
 * Persist completed Career Analyst batches and generated document text immediately so an interrupted run can resume without repeating completed model calls.
+* Persist LinkedIn fetch status and Reviewer progress/results locally so resumed runs retain review state.
 * Keep `run_state.json` current with stage status and input identity; resume only when the saved inputs match.
 * Treat agent output JSON as local candidate data; do not commit it or include credentials.
 
@@ -100,7 +111,10 @@ All pipeline executions follow a strict chronological directory schema to ensure
          └─────────────────┬─────────────────┘
                            │
                            ▼
-            [5. Summary Report Writer Agent]
+              [5. Document Reviewer Agent]
+                           │
+                           ▼
+            [6. Summary Report Writer Agent]
                            │
                tracker.html / tracker.csv
 ```

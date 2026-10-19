@@ -117,6 +117,64 @@ class ApplicationDocumentTests(unittest.TestCase):
         cv_agent.create.assert_called_once()
         letter_agent.create.assert_called_once()
 
+    def test_reviewer_feedback_triggers_one_revision_and_a_final_review(self) -> None:
+        cv_agent = Mock()
+        cv_agent.create.side_effect = ["Initial CV", "Revised CV"]
+        letter_agent = Mock()
+        letter_agent.create.side_effect = ["Initial letter", "Revised letter"]
+        reviewer = Mock()
+        reviewer.review.side_effect = [
+            {
+                "approved": False,
+                "cv_findings": ["CV lacks evidence for the role's reliability responsibility."],
+                "cover_letter_findings": ["Letter does not name the hiring company."],
+                "summary": "Role alignment needs improvement.",
+            },
+            {
+                "approved": True,
+                "cv_findings": [],
+                "cover_letter_findings": [],
+                "summary": "Both documents passed.",
+            },
+        ]
+        review_progress: list[dict[str, object]] = []
+        job = {
+            "job_id": "role-1",
+            "company": "Example Ltd",
+            "title": "Platform Engineer",
+            "description": "Improve platform reliability.",
+        }
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            with (
+                patch("talent_agent.documents.CVEditorAgent", return_value=cv_agent),
+                patch("talent_agent.documents.CoverLetterWriterAgent", return_value=letter_agent),
+            ):
+                result = generate_application_docs(
+                    "Master CV",
+                    job,
+                    {},
+                    Path(temporary_dir),
+                    output_format="md",
+                    reviewer=reviewer,
+                    linkedin_profile={"status": "available", "text": "Candidate profile"},
+                    on_review_progress=lambda record: review_progress.append(dict(record)),
+                )
+
+            self.assertEqual((Path(temporary_dir) / result["cv_document"]).read_text().strip(), "Revised CV")
+            self.assertEqual(
+                (Path(temporary_dir) / result["cover_letter_document"]).read_text().strip(),
+                "Revised letter",
+            )
+
+        self.assertTrue(result["document_review"]["approved"])
+        self.assertEqual(reviewer.review.call_count, 2)
+        self.assertEqual(cv_agent.create.call_count, 2)
+        self.assertIn("reliability responsibility", cv_agent.create.call_args.args[3][0])
+        self.assertIn("hiring company", letter_agent.create.call_args.args[4][0])
+        self.assertTrue(any(record["status"] == "revision_pending" for record in review_progress))
+        self.assertEqual(review_progress[-1]["status"], "complete")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,11 @@ from .llm import is_safety_metadata_only
 from .memory import read_json_object, write_json
 from .reporter import SummaryReportWriterAgent
 from .researcher import ResearcherAgent, fetch_apify_jobs, normalize_jobs
+from .reviewer import (
+    DOCUMENT_REVIEW_VERSION,
+    DocumentReviewerAgent,
+    fetch_linkedin_profile,
+)
 
 
 def run_pipeline(
@@ -27,6 +32,7 @@ def run_pipeline(
     minimum_day_rate: float | None = None, minimum_annual_salary: float | None = None,
     exclude_unknown_compensation: bool = False, exclude_security_clearance: bool = False,
     linkedin_url: str = "", github_url: str = "",
+    review_documents: bool = True, review_linkedin_profile: bool = True,
     output_root: Path = Path("outputs"), run_id: str = "",
     dated_subfolders: bool = True, date_format: str = "%Y-%m-%d",
     raw_jobs_filename: str = "raw_jobs.json", prioritized_jobs_filename: str = "prioritized_jobs.json",
@@ -61,6 +67,8 @@ def run_pipeline(
     if github_url.strip():
         candidate["github_url"] = github_url.strip()
     github_url = str(candidate.get("github_url", "")).strip()
+    candidate["review_documents"] = review_documents
+    candidate["review_linkedin_profile"] = review_linkedin_profile
     candidate["locations"] = search_locations
     if minimum_day_rate is not None:
         candidate["minimum_day_rate"] = minimum_day_rate
@@ -146,12 +154,53 @@ def run_pipeline(
     analyst_path = memory_dir / "career_analyst.json"
     cv_editor_path = memory_dir / "cv_editor.json"
     cover_letter_path = memory_dir / "cover_letter_writer.json"
+    document_reviewer_path = memory_dir / "document_reviewer.json"
+    linkedin_profile_path = memory_dir / "linkedin_profile.json"
+    profile_url = str(candidate.get("linkedin_url", "")).strip()
+    if review_linkedin_profile and profile_url:
+        saved_profile: dict[str, Any] | None = None
+        if linkedin_profile_path.is_file():
+            cached_profile = read_json_object(linkedin_profile_path)
+            if cached_profile.get("url") == profile_url:
+                saved_profile = cached_profile
+        linkedin_profile = saved_profile or fetch_linkedin_profile(profile_url)
+        if saved_profile is None:
+            write_json(linkedin_profile_path, linkedin_profile)
+        if linkedin_profile.get("status") != "available":
+            say(
+                "   ⚠ LinkedIn profile could not be verified from public page content: "
+                f"{linkedin_profile.get('reason', 'no profile content available')}"
+            )
+    else:
+        linkedin_profile = {
+            "url": profile_url,
+            "status": "disabled" if not review_linkedin_profile else "not_provided",
+            "text": "",
+            "reason": (
+                "LinkedIn profile fetching is disabled."
+                if not review_linkedin_profile
+                else "No LinkedIn profile URL was provided."
+            ),
+            "fetched_at": "",
+        }
+    linkedin_profile_sha256 = hashlib.sha256(
+        json.dumps(
+            {
+                "status": linkedin_profile.get("status"),
+                "text": linkedin_profile.get("text", ""),
+                "reason": linkedin_profile.get("reason", ""),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
     expected_context = {
         "cv_sha256": hashlib.sha256(cv.encode("utf-8")).hexdigest(),
         "candidate_sha256": hashlib.sha256(
             json.dumps(candidate, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest(),
         "raw_jobs_sha256": hashlib.sha256(raw_path.read_bytes()).hexdigest(),
+        "linkedin_profile_sha256": linkedin_profile_sha256,
     }
     if resume_from is not None and run_state:
         saved_context = run_state.get("context")
@@ -170,7 +219,14 @@ def run_pipeline(
                 f"Cannot resume with model '{model_name}'; the saved run used '{run_state.get('model')}'. "
                 "Use the original model or start a new run."
             )
-        if saved_context.get("candidate_sha256") != expected_context["candidate_sha256"]:
+        candidate_changed = (
+            saved_context.get("candidate_sha256") != expected_context["candidate_sha256"]
+        )
+        profile_changed = (
+            saved_context.get("linkedin_profile_sha256")
+            != expected_context["linkedin_profile_sha256"]
+        )
+        if candidate_changed:
             say(
                 "   Candidate preferences changed; re-running Career Analyst and regenerating "
                 "application documents from the saved job listings."
@@ -188,9 +244,40 @@ def run_pipeline(
                         "outputs": {},
                     },
                 )
+            write_json(
+                document_reviewer_path,
+                {
+                    "version": 1,
+                    "prompt_version": DOCUMENT_REVIEW_VERSION,
+                    "outputs": {},
+                },
+            )
             stages = run_state.get("stages")
             if isinstance(stages, dict):
-                for stage in ("career_analyst", "cv_editor", "cover_letter_writer", "report"):
+                for stage in (
+                    "career_analyst", "cv_editor", "cover_letter_writer",
+                    "document_reviewer", "report",
+                ):
+                    stages[stage] = "pending"
+            run_state["context"] = expected_context
+            write_json(state_path, run_state)
+        elif profile_changed:
+            say(
+                "   LinkedIn evidence changed; regenerating application documents and "
+                "re-running the document review from saved job listings."
+            )
+            for checkpoint_path, prompt_version in (
+                (cv_editor_path, APPLICATION_PROMPT_VERSION),
+                (cover_letter_path, APPLICATION_PROMPT_VERSION),
+                (document_reviewer_path, DOCUMENT_REVIEW_VERSION),
+            ):
+                write_json(
+                    checkpoint_path,
+                    {"version": 1, "prompt_version": prompt_version, "outputs": {}},
+                )
+            stages = run_state.get("stages")
+            if isinstance(stages, dict):
+                for stage in ("cv_editor", "cover_letter_writer", "document_reviewer", "report"):
                     stages[stage] = "pending"
             run_state["context"] = expected_context
             write_json(state_path, run_state)
@@ -226,6 +313,9 @@ def run_pipeline(
         write_json(cover_letter_path, {
             "version": 1, "prompt_version": APPLICATION_PROMPT_VERSION, "outputs": {},
         })
+        write_json(document_reviewer_path, {
+            "version": 1, "prompt_version": DOCUMENT_REVIEW_VERSION, "outputs": {},
+        })
     else:
         for checkpoint_path, default in (
             (researcher_path, {"version": 1, "status": "pending", "jobs": []}),
@@ -235,6 +325,9 @@ def run_pipeline(
             }),
             (cover_letter_path, {
                 "version": 1, "prompt_version": APPLICATION_PROMPT_VERSION, "outputs": {},
+            }),
+            (document_reviewer_path, {
+                "version": 1, "prompt_version": DOCUMENT_REVIEW_VERSION, "outputs": {},
             }),
         ):
             if not checkpoint_path.exists():
@@ -308,14 +401,27 @@ def run_pipeline(
     cv_outputs = cv_editor_data.get("outputs", {})
     cover_letter_data = read_json_object(cover_letter_path)
     cover_letter_outputs = cover_letter_data.get("outputs", {})
-    if not isinstance(cv_outputs, dict) or not isinstance(cover_letter_outputs, dict):
+    reviewer_data = read_json_object(document_reviewer_path)
+    reviewer_outputs = reviewer_data.get("outputs", {})
+    if (
+        not isinstance(cv_outputs, dict)
+        or not isinstance(cover_letter_outputs, dict)
+        or not isinstance(reviewer_outputs, dict)
+    ):
         raise ValueError("Saved application-agent outputs must be JSON objects keyed by job ID")
     if cv_editor_data.get("prompt_version") != APPLICATION_PROMPT_VERSION:
         cv_outputs = {}
     if cover_letter_data.get("prompt_version") != APPLICATION_PROMPT_VERSION:
         cover_letter_outputs = {}
+    if reviewer_data.get("prompt_version") != DOCUMENT_REVIEW_VERSION:
+        reviewer_outputs = {}
     set_stage("cv_editor", "in_progress")
     set_stage("cover_letter_writer", "in_progress")
+    if review_documents:
+        set_stage("document_reviewer", "in_progress")
+    else:
+        set_stage("document_reviewer", "complete")
+    document_reviewer: DocumentReviewerAgent | None = None
     for index, job in enumerate(prioritized, start=1):
         say(f"\n💼 Application {index}/{len(prioritized)} · {job['title']} — {job['company']} (match {job['score']:.1f})")
         job_id = str(job["job_id"])
@@ -336,10 +442,27 @@ def run_pipeline(
                 "outputs": cover_letter_outputs,
             })
 
+        def save_review(record: dict[str, Any], *, key: str = job_id) -> None:
+            reviewer_outputs[key] = record
+            write_json(document_reviewer_path, {
+                "version": 1,
+                "prompt_version": DOCUMENT_REVIEW_VERSION,
+                "outputs": reviewer_outputs,
+            })
+
         cv_record = cv_outputs.get(job_id, {})
         letter_record = cover_letter_outputs.get(job_id, {})
+        review_record = reviewer_outputs.get(job_id, {})
         cv_text = cv_record.get("text") if isinstance(cv_record, dict) else None
         letter_text = letter_record.get("text") if isinstance(letter_record, dict) else None
+        if not isinstance(review_record, dict):
+            review_record = None
+        if (
+            review_documents
+            and (review_record is None or review_record.get("status") != "complete")
+            and document_reviewer is None
+        ):
+            document_reviewer = DocumentReviewerAgent(model)
         if not isinstance(cv_text, str) or not cv_text.strip() or is_safety_metadata_only(cv_text):
             cv_text = None
         if (
@@ -354,6 +477,10 @@ def run_pipeline(
                 github_url=github_url,
                 cv_text=cv_text, cover_letter_text=letter_text,
                 on_cv_generated=save_cv, on_cover_letter_generated=save_letter,
+                reviewer=document_reviewer if review_documents else None,
+                linkedin_profile=linkedin_profile,
+                review_record=review_record,
+                on_review_progress=save_review,
             )
         )
         write_json(prioritized_path, prioritized)
@@ -363,10 +490,15 @@ def run_pipeline(
     cover_letter_data["outputs"] = cover_letter_outputs
     cover_letter_data["status"] = "complete"
     cover_letter_data["prompt_version"] = APPLICATION_PROMPT_VERSION
+    reviewer_data["outputs"] = reviewer_outputs
+    reviewer_data["status"] = "complete"
+    reviewer_data["prompt_version"] = DOCUMENT_REVIEW_VERSION
     write_json(cv_editor_path, cv_editor_data)
     write_json(cover_letter_path, cover_letter_data)
+    write_json(document_reviewer_path, reviewer_data)
     set_stage("cv_editor", "complete")
     set_stage("cover_letter_writer", "complete")
+    set_stage("document_reviewer", "complete")
     set_stage("report", "in_progress")
     say(f"\n📊 Summary Report Writer is building {', '.join(tracker_formats or ['html', 'csv']).upper()} tracker(s)…")
     SummaryReportWriterAgent().write(

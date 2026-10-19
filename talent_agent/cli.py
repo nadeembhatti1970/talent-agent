@@ -38,7 +38,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Exclude jobs that require security clearance (overrides config)",
     )
-    run.add_argument("--linkedin-url", default=LINKEDIN_PROFILE_URL, help="Candidate profile URL (recorded as context; not fetched)")
+    run.add_argument(
+        "--review-documents",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Quality-review generated CVs and cover letters (overrides config)",
+    )
+    run.add_argument(
+        "--review-linkedin-profile",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Fetch public LinkedIn profile content for document verification (overrides config)",
+    )
+    run.add_argument("--linkedin-url", default=LINKEDIN_PROFILE_URL, help="Candidate profile URL")
     run.add_argument("--github-url", default=None, help="Candidate GitHub profile URL (overrides config)")
     run.add_argument("--output-dir", type=Path, help="Override configured output root directory")
     run.add_argument("--dated-subfolders", action=argparse.BooleanOptionalAction, default=None, help="Enable or disable date-named output folders")
@@ -76,6 +88,14 @@ def main() -> int:
             if args.exclude_security_clearance is not None
             else config["exclude_security_clearance"]
         )
+        review_documents = (
+            args.review_documents if args.review_documents is not None else config["review_documents"]
+        )
+        review_linkedin_profile = (
+            args.review_linkedin_profile
+            if args.review_linkedin_profile is not None
+            else config["review_linkedin_profile"]
+        )
         output_config = config["output"]
         output_path = run_pipeline(
             jobs_path=args.jobs, search=args.search, resume_from=args.resume,
@@ -87,6 +107,8 @@ def main() -> int:
             minimum_annual_salary=args.min_annual_salary if args.min_annual_salary is not None else config["minimum_annual_salary"],
             exclude_unknown_compensation=exclude_unknown,
             exclude_security_clearance=exclude_security_clearance,
+            review_documents=review_documents,
+            review_linkedin_profile=review_linkedin_profile,
             linkedin_url=args.linkedin_url,
             github_url=github_url,
             output_root=args.output_dir or Path(output_config["root_dir"]), run_id=args.run_id,

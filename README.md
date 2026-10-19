@@ -1,6 +1,6 @@
 # Talent Agent
 
-A five-role job search and application tailoring pipeline. The Researcher normalizes job listings, the Career Analyst scores them against a candidate profile, the CV Editor and Cover Letter Writer create tailored Word documents, and the Summary Report Writer creates HTML and CSV trackers.
+A six-role job search and application tailoring pipeline. The Researcher normalizes job listings, the Career Analyst scores them against a candidate profile, the CV Editor and Cover Letter Writer create tailored Word documents, the Document Reviewer checks them for role alignment and factual support, and the Summary Report Writer creates HTML and CSV trackers.
 
 Each role uses OpenRouter's OpenAI-compatible Chat Completions API. The default model is `openrouter/free`, which routes requests to currently available free models. Override it with `OPENROUTER_MODEL` if needed.
 
@@ -73,6 +73,8 @@ Set `APIFY_ACTOR_ID` to an actor you have access to. The built-in request suppor
 
 Edit [`config/search.json`](config/search.json) to set the keywords, `locations` list, employment types, pay filters, security-clearance exclusion, and optional `github_profile_url`. The GitHub URL can also be set as `GITHUB_PROFILE_URL` in `talent_agent/settings.py`. The Researcher searches each location separately and divides `max_results` across those searches; the combined results are deduplicated and capped at `max_results` total. Keywords can be a string or an array. `employment_types` accepts `contract`, `permanent`, or both. Contract listings use `minimum_day_rate`; permanent listings use `minimum_annual_salary`. Amounts use the configured `currency`. A listing with no parseable pay amount is kept by default; set `exclude_unknown_compensation` to `true` to reject it when the corresponding minimum is active. `include_unknown_contract_compensation` can override this for contract roles, allowing listings without a stated rate through for manual review while still enforcing the minimum on known day rates. Listings whose pay period is explicitly annual are not treated as unknown day-rate roles. Set `exclude_security_clearance` to `true` to drop listings that state a clearance is required; it defaults to `false` when omitted. The CLI option `--no-exclude-security-clearance` disables the config setting for one run. Filters also apply when jobs come from a local JSON file.
 
+The Document Reviewer runs by default (`review_documents: true`). It checks the CV and cover letter against the job responsibilities, hiring company, original CV, and—when public profile content is readable—the LinkedIn profile. Public profile fetching is limited to HTTPS `linkedin.com/in/` pages, does not use login credentials or bypass access controls, and may be unavailable if LinkedIn requires sign-in. Unavailable profile content is explicitly marked as unverified; review still proceeds against the original CV. The reviewer flags unsupported or contradictory claims and generic role alignment, then the document writers get one revision attempt followed by a final review. Any remaining findings and LinkedIn verification status appear in the tracker and `agent_outputs/document_reviewer.json`. Set `review_linkedin_profile: false` or pass `--no-review-linkedin-profile` to skip fetching; set `review_documents: false` or pass `--no-review-documents` to skip document review.
+
 CLI values override the file for that run, for example:
 
 ```bash
@@ -87,13 +89,14 @@ Repeat `--location` to search more than one place, for example `--location Londo
 1. Researcher normalizes and deduplicates source listings into `raw_jobs.json`.
 2. Employment type and configured compensation filters are applied, then the Career Analyst returns a 0–100 match score and rationale per listing. Only scores at or above 70 are retained in `prioritized_jobs.json`.
 3. CV Editor and Cover Letter Writer create one DOCX each per retained job in `applications/`. Documents contain no template labels, generated-document headings, or date placeholders. A configured GitHub profile URL is included in both documents. Prompts explicitly prohibit inventing candidate credentials.
-4. Summary Report Writer creates `tracker.html` and `tracker.csv`, with external job links and relative links to generated files.
+4. Document Reviewer checks factual support and role/client alignment against the original CV, available public LinkedIn text, and listing. It can request one revision and records final findings.
+5. Summary Report Writer creates `tracker.html` and `tracker.csv`, with external job links, relative links to generated files, and document-review status.
 
 Empty or invalid JSON model responses are retried up to three times. If a run still stops on a model response, rerun it or select another OpenRouter model with `--model` or `OPENROUTER_MODEL`.
 
 The pipeline requires a source of jobs. LinkedIn profile URLs are recorded as candidate context; the app does not fetch private profile data. Add candidate details and compensation preferences with CLI options or a candidate JSON file. Candidate CV and profile data are excluded from version control by `.gitignore`.
 
-Runs save `researcher.json`, `career_analyst.json` (after each completed batch), `cv_editor.json`, and `cover_letter_writer.json` under `outputs/YYYY-MM-DD/agent_outputs/`. To continue an interrupted run without repeating completed model work, pass its output directory to `--resume`, for example:
+Runs save `researcher.json`, `career_analyst.json` (after each completed batch), `cv_editor.json`, `cover_letter_writer.json`, and `document_reviewer.json` under `outputs/YYYY-MM-DD/agent_outputs/`. The public LinkedIn profile text, when fetched, is cached in `linkedin_profile.json` for the run. To continue an interrupted run without repeating completed model work, pass its output directory to `--resume`, for example:
 
 ```bash
 talent-agent run --resume outputs/2026-10-16

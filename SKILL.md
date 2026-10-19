@@ -37,6 +37,12 @@ This document defines the atomic operational skills, tool integrations, and data
 * **Tool Integration:** Pandas DataFrame to HTML/CSV converter
 * **Link Schema:** Embed relative local filesystem paths using URI schemes (`file://abs_path/to/outputs/...`) alongside target-blank web links for original job postings.
 
+### 5. Application Document Quality Review (Document Reviewer Skill)
+* **Inputs:** Original Master CV, job listing, generated CV and cover letter, and optional text from an accessible public LinkedIn profile.
+* **Checks:** Role responsibility and hiring-company alignment; material claims supported by the Master CV or LinkedIn evidence; contradictions and unsupported claims.
+* **Rules:** Treat the Master CV as authoritative. Do not treat missing LinkedIn details as proof that a claim is false. Do not bypass LinkedIn sign-in or other access controls; mark inaccessible profile content as unverified.
+* **Output:** JSON findings and approval status under `agent_outputs/document_reviewer.json`. Give document writers one revision attempt, then re-review and preserve unresolved findings for the tracker.
+
 ---
 
 ## 📋 Execution Checklist
@@ -47,11 +53,13 @@ This document defines the atomic operational skills, tool integrations, and data
 4. **Tailor (Loop per Job):**
    * Execute CV Editor $\rightarrow$ save `.docx`.
    * Execute Cover Letter Writer $\rightarrow$ save `.docx`.
-5. **Report:** Run Summary Report Writer to generate `tracker.html` and `tracker.csv`.
+5. **Review:** Run Document Reviewer; revise flagged documents once and perform a final review.
+6. **Report:** Run Summary Report Writer to generate `tracker.html` and `tracker.csv`, including review status.
 
 ## 💾 Durable Agent Outputs
 
 - Save each agent's output as JSON under `outputs/YYYY-MM-DD/agent_outputs/`.
 - Persist completed Career Analyst batches and CV/cover-letter text immediately; update `run_state.json` with stage status and input identity.
+- Save public LinkedIn profile fetch status/text and Reviewer progress/results locally for resume support.
 - On resume, load valid saved agent output and continue from the first incomplete unit of work rather than repeating completed model requests.
 - These checkpoints may contain candidate CV and generated application content; keep them local and out of version control.
