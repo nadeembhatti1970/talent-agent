@@ -65,6 +65,7 @@ class DocumentReviewerTests(unittest.TestCase):
         self.assertIn("Example Ltd", prompt)
         self.assertIn("https://github.com/example-user", prompt)
         self.assertIn("Treat this exact configured URL as authorized", prompt)
+        self.assertIn("Never infer an additional role or dates from apparent timeline gaps", prompt)
         self.assertTrue(agent.agent.complete.call_args.kwargs["json_output"])
 
 

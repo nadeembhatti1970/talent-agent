@@ -10,7 +10,7 @@ import requests
 
 from .llm import OpenRouterAgent
 
-DOCUMENT_REVIEW_VERSION = 2
+DOCUMENT_REVIEW_VERSION = 3
 MAX_LINKEDIN_PROFILE_BYTES = 2_000_000
 MAX_LINKEDIN_PROFILE_TEXT = 12_000
 
@@ -171,7 +171,8 @@ class DocumentReviewerAgent:
             "for factual support against the master CV and, when available, the LinkedIn profile. Check that "
             "each is tailored to the actual responsibilities and hiring company, not just the title. Do not "
             "treat absence from LinkedIn as proof that a claim is false. The master CV is authoritative; "
-            "flag contradictions or unsupported material claims. Return only the requested JSON object.",
+            "flag contradictions or unsupported material claims. Do not invent candidate roles, titles, "
+            "dates, or employment gaps. Return only the requested JSON object.",
             f"""Review these documents for the role.
 
 JOB LISTING:
@@ -205,7 +206,7 @@ COVER LETTER TO REVIEW:
 
 Return exactly this JSON shape:
 {{"cv_findings": ["actionable issue"], "cover_letter_findings": ["actionable issue"], "summary": "brief result"}}
-Each findings array must be empty if its document passes. Flag unsupported or contradictory material claims, poor factual fidelity, generic content that does not connect responsibilities to evidence, and incorrect company/role references. Do not treat an omitted historical role as a factual error unless the omission materially misrepresents the candidate's experience. Do not flag missing LinkedIn content when the profile is unavailable.""",
+Each findings array must be empty if its document passes. Flag unsupported or contradictory material claims, poor factual fidelity, generic content that does not connect responsibilities to evidence, and incorrect company/role references. For employment-history completeness, only flag omission of a role, title, or date when that exact information is explicitly present in the master CV or LinkedIn profile. Never infer an additional role or dates from apparent timeline gaps, and do not treat an unlisted role as an omission. Do not treat an omitted historical role as a factual error unless the omission materially misrepresents the candidate's experience. Do not flag missing LinkedIn content when the profile is unavailable.""",
             json_output=True,
         )
         result = json.loads(response)
