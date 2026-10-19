@@ -118,6 +118,9 @@ def main() -> int:
             minimum_day_rate=args.min_day_rate if args.min_day_rate is not None else config["minimum_day_rate"],
             minimum_annual_salary=args.min_annual_salary if args.min_annual_salary is not None else config["minimum_annual_salary"],
             exclude_unknown_compensation=exclude_unknown,
+            include_unknown_contract_compensation=config.get(
+                "include_unknown_contract_compensation", not exclude_unknown
+            ),
             exclude_security_clearance=exclude_security_clearance,
             review_documents=review_documents,
             review_linkedin_profile=review_linkedin_profile,

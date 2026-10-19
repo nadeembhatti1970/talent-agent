@@ -41,6 +41,32 @@ class FilterJobsTests(unittest.TestCase):
 
         self.assertEqual(filter_jobs(jobs, config), [])
 
+    def test_hourly_contract_rate_is_converted_to_an_eight_hour_day(self) -> None:
+        jobs = [
+            {"job_id": "hourly-at-minimum", "employment_type": "contract", "salary": "£75 per hour"},
+            {"job_id": "hourly-below-minimum", "employment_type": "contract", "salary": "£74/hour"},
+            {"job_id": "hourly-range", "employment_type": "contract", "salary": "£100.00/hr - £145.00/hr"},
+        ]
+
+        self.assertEqual(
+            [job["job_id"] for job in filter_jobs(jobs, self.config)],
+            ["hourly-at-minimum", "hourly-range"],
+        )
+
+    def test_unknown_workplace_is_kept_when_arrangement_list_is_restricted(self) -> None:
+        jobs = [
+            {"job_id": "remote", "workplace_arrangement": "remote"},
+            {"job_id": "unknown", "workplace_arrangement": "unknown"},
+            {"job_id": "not-stated", "title": "Platform Engineer"},
+            {"job_id": "onsite", "workplace_arrangement": "onsite"},
+        ]
+        config = {**self.config, "workplace_arrangements": ["remote", "hybrid"]}
+
+        self.assertEqual(
+            [job["job_id"] for job in filter_jobs(jobs, config)],
+            ["remote", "unknown", "not-stated"],
+        )
+
     def test_excludes_roles_with_required_security_clearance(self) -> None:
         jobs = [
             {
@@ -110,7 +136,7 @@ class FilterJobsTests(unittest.TestCase):
 
         self.assertEqual(
             [job["job_id"] for job in filter_jobs(jobs, config)],
-            ["remote", "hybrid"],
+            ["remote", "hybrid", "unknown"],
         )
 
     def test_classifies_workplace_type_and_text_fallback(self) -> None:

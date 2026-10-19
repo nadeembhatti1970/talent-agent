@@ -19,6 +19,7 @@ This document defines the atomic operational skills, tool integrations, and data
   }
   ```
 * **Output Standard:** Request up to `max_results` for each configured location, interleave and deduplicate results across locations, then cap the combined raw listing set at `max_results` total. If `max_results` is `null`, omit per-request result limits and do not cap the combined results locally; the actor/platform may still impose limits. Apply the selected workplace arrangements (remote, hybrid/partly remote, and/or onsite), and write a normalized JSON array containing `job_id`, `title`, `company`, `location`, `workplace_arrangement`, `url`, `description`, and `scraped_at`.
+* Listings with unknown workplace arrangements remain eligible for downstream review, even when only specific arrangements are selected. Hourly contract rates are converted to day rates using an 8-hour workday before applying the configured minimum.
 
 ### 2. Candidate Alignment & Evaluation (Career Analyst Skill)
 * **Tool Integration:** Local File Reader & LLM Text Analysis

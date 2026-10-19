@@ -32,6 +32,7 @@ def run_pipeline(
     workplace_arrangements: list[str] | None = None,
     minimum_day_rate: float | None = None, minimum_annual_salary: float | None = None,
     exclude_unknown_compensation: bool = False, exclude_security_clearance: bool = False,
+    include_unknown_contract_compensation: bool | None = None,
     linkedin_url: str = "", github_url: str = "",
     review_documents: bool = True, review_linkedin_profile: bool = True,
     output_root: Path = Path("outputs"), run_id: str = "",
@@ -373,6 +374,11 @@ def run_pipeline(
         "minimum_day_rate": minimum_day_rate,
         "minimum_annual_salary": minimum_annual_salary,
         "exclude_unknown_compensation": exclude_unknown_compensation,
+        "include_unknown_contract_compensation": (
+            include_unknown_contract_compensation
+            if include_unknown_contract_compensation is not None
+            else not exclude_unknown_compensation
+        ),
         "exclude_security_clearance": exclude_security_clearance,
         "currency": currency,
     }

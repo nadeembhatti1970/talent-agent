@@ -36,6 +36,7 @@ _CLEARANCE_REQUIRED_PATTERNS = (
     ),
 )
 _WORKPLACE_ARRANGEMENTS = {"remote", "hybrid", "onsite"}
+_HOURS_PER_WORKDAY = 8
 
 
 def classify_workplace_arrangement(job: dict[str, Any]) -> str:
@@ -97,8 +98,6 @@ def filter_jobs(jobs: list[dict[str, Any]], config: dict[str, Any]) -> list[dict
         arrangement = classify_workplace_arrangement(job)
         if arrangement in _WORKPLACE_ARRANGEMENTS and arrangement not in allowed_arrangements:
             continue
-        if arrangement == "unknown" and len(allowed_arrangements) < len(_WORKPLACE_ARRANGEMENTS):
-            continue
         kind = str(job.get("employment_type", "unknown")).lower()
         # Unknown types remain eligible when both categories are selected; a single-category
         # search requires a positive classification to avoid silently mixing job types.
@@ -109,7 +108,12 @@ def filter_jobs(jobs: list[dict[str, Any]], config: dict[str, Any]) -> list[dict
         salary = str(job.get("salary", ""))
         compensation_period = _compensation_period(salary)
         expected_period = "daily" if kind == "contract" else "annual" if kind == "permanent" else None
-        if compensation_period and expected_period and compensation_period != expected_period:
+        if (
+            compensation_period
+            and expected_period
+            and compensation_period != expected_period
+            and not (kind == "contract" and compensation_period == "hourly")
+        ):
             continue
         minimum = config["minimum_day_rate"] if kind == "contract" else config["minimum_annual_salary"] if kind == "permanent" else None
         if minimum is not None:
@@ -145,10 +149,15 @@ def _compensation_period(value: str) -> str | None:
     text = value.lower()
     daily = bool(re.search(r"(?:/\s*day|per\s+day|daily|a\s+day|\bday\s+rate\b)", text))
     annual = bool(re.search(r"(?:/\s*(?:year|yr|annum|pa)|per\s+(?:year|annum)|\bannual(?:ly)?\b|\bpa\b|\bp\.a\.\b)", text))
-    if daily and not annual:
+    hourly = bool(
+        re.search(r"(?:/\s*(?:hr|hour)\b|per\s+hour\b|\bhourly\b|\ban?\s+hour\b)", text)
+    )
+    if daily and not annual and not hourly:
         return "daily"
-    if annual and not daily:
+    if annual and not daily and not hourly:
         return "annual"
+    if hourly and not daily and not annual:
+        return "hourly"
     return None
 
 
@@ -168,6 +177,8 @@ def _matching_compensation(value: str, employment_type: str, currency: str) -> f
     period = _compensation_period(text)
     if period == "daily" and employment_type != "contract":
         return None
+    if period == "hourly" and employment_type != "contract":
+        return None
     if period == "annual" and employment_type != "permanent":
         return None
     numbers = [float(value.replace(",", "")) for value in re.findall(r"\d[\d,]*(?:\.\d+)?", text)]
@@ -175,4 +186,5 @@ def _matching_compensation(value: str, employment_type: str, currency: str) -> f
         return None
     if re.search(r"\d\s*k\b", text):
         numbers = [number * 1000 if number < 1000 else number for number in numbers]
-    return max(numbers)
+    amount = max(numbers)
+    return amount * _HOURS_PER_WORKDAY if period == "hourly" else amount
