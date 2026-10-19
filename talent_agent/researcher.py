@@ -121,6 +121,16 @@ class ResearcherAgent:
 def fetch_apify_jobs(
     keywords: str, location: str, date_posted: str, max_results: int | None
 ) -> list[dict[str, Any]]:
+    api_date = {
+        "past_24_hours": "past24Hours",
+        "past_week": "pastWeek",
+        "past_month": "pastMonth",
+        "any_time": "anyTime",
+    }.get(date_posted)
+    if api_date is None:
+        raise ValueError(
+            "date_posted must be 'past_24_hours', 'past_week', 'past_month', or 'any_time'"
+        )
     token = os.getenv("APIFY_API_TOKEN")
     if not token:
         raise RuntimeError("APIFY_API_TOKEN is required for --search; alternatively provide --jobs JSON.")
@@ -133,7 +143,6 @@ def fetch_apify_jobs(
         owner, actor_name = actor_id.split("/", 1)
         actor_id = f"{owner}~{actor_name}"
     endpoint = f"https://api.apify.com/v2/acts/{quote(actor_id, safe='~')}/runs"
-    api_date = {"past_24_hours": "past24Hours", "past_week": "pastWeek"}.get(date_posted, "anyTime")
     actor_input: dict[str, Any] = {
         "keywords": keywords,
         "location": location,

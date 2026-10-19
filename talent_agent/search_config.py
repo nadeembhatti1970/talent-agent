@@ -10,6 +10,7 @@ from .settings import GITHUB_PROFILE_URL, PROJECT_ROOT
 DEFAULT_SEARCH_CONFIG = PROJECT_ROOT / "config" / "search.json"
 ALLOWED_EMPLOYMENT_TYPES = {"contract", "permanent"}
 ALLOWED_WORKPLACE_ARRANGEMENTS = {"remote", "hybrid", "onsite"}
+ALLOWED_DATE_POSTED = {"past_24_hours", "past_week", "past_month", "any_time"}
 DEFAULT_OUTPUT_CONFIG = {
     "root_dir": "outputs",
     "dated_subfolders": True,
@@ -114,8 +115,10 @@ def load_search_config(path: Path = DEFAULT_SEARCH_CONFIG) -> dict[str, Any]:
     if not types:
         raise ValueError("Select at least one employment type")
     config["employment_types"] = sorted(types)
-    if config["date_posted"] not in {"past_24_hours", "past_week"}:
-        raise ValueError("date_posted must be 'past_24_hours' or 'past_week'")
+    if config["date_posted"] not in ALLOWED_DATE_POSTED:
+        raise ValueError(
+            "date_posted must be 'past_24_hours', 'past_week', 'past_month', or 'any_time'"
+        )
     if config["max_results"] is not None:
         max_results = config["max_results"]
         if (

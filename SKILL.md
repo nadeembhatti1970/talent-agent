@@ -14,7 +14,7 @@ This document defines the atomic operational skills, tool integrations, and data
     "search_keywords": "string",
     "locations": ["string"],
     "workplace_arrangements": ["remote | hybrid | onsite"],
-    "date_posted": "past_24_hours | past_week",
+    "date_posted": "past_24_hours | past_week | past_month | any_time",
     "max_results": 50
   }
   ```

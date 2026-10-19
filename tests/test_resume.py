@@ -39,6 +39,20 @@ class ResumeTests(unittest.TestCase):
             config_path.write_text(json.dumps({"location": "London"}), encoding="utf-8")
             self.assertEqual(load_search_config(config_path)["locations"], ["London"])
 
+            for date_posted in ("past_24_hours", "past_week", "past_month", "any_time"):
+                config_path.write_text(
+                    json.dumps({"location": "London", "date_posted": date_posted}),
+                    encoding="utf-8",
+                )
+                self.assertEqual(load_search_config(config_path)["date_posted"], date_posted)
+
+            config_path.write_text(
+                json.dumps({"location": "London", "date_posted": "past_year"}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "date_posted must be"):
+                load_search_config(config_path)
+
     def test_default_search_config_has_separate_locations_and_contract_review_setting(self) -> None:
         config = load_search_config()
 
@@ -427,6 +441,10 @@ class ResumeTests(unittest.TestCase):
                 "--workplace-arrangement", "partly-remote",
             ])
             self.assertEqual(arrangement_args.workplace_arrangement, ["remote", "partly-remote"])
+            date_args = parser.parse_args([
+                "run", "--jobs", "jobs.json", "--date-posted", "past_month",
+            ])
+            self.assertEqual(date_args.date_posted, "past_month")
 
     def test_reviewer_output_is_checkpointed_and_reused_on_resume(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:

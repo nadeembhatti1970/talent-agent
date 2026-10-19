@@ -93,6 +93,42 @@ class ResearcherTests(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs["json"]["limitPerSource"], 50)
         self.assertEqual(get.call_args.kwargs["params"]["limit"], 50)
 
+    def test_date_posted_options_map_to_apify_values(self) -> None:
+        expected = {
+            "past_24_hours": "past24Hours",
+            "past_week": "pastWeek",
+            "past_month": "pastMonth",
+            "any_time": "anyTime",
+        }
+        for option, api_value in expected.items():
+            with self.subTest(option=option):
+                run_response = Mock()
+                run_response.status_code = 201
+                run_response.json.return_value = {
+                    "data": {
+                        "id": "run-1",
+                        "status": "SUCCEEDED",
+                        "defaultDatasetId": "dataset-1",
+                    }
+                }
+                dataset_response = Mock()
+                dataset_response.json.return_value = []
+                with (
+                    patch.dict(
+                        os.environ,
+                        {"APIFY_API_TOKEN": "test-token", "APIFY_ACTOR_ID": "owner/actor"},
+                    ),
+                    patch("talent_agent.researcher.requests.post", return_value=run_response) as post,
+                    patch("talent_agent.researcher.requests.get", return_value=dataset_response),
+                ):
+                    fetch_apify_jobs("Platform Engineer", "London", option, 10)
+
+                self.assertEqual(post.call_args.kwargs["json"]["datePosted"], api_value)
+
+    def test_invalid_date_posted_option_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "date_posted must be"):
+            fetch_apify_jobs("Platform Engineer", "London", "past_year", 10)
+
     def test_apify_run_is_polled_until_completion_before_loading_dataset(self) -> None:
         run_response = Mock()
         run_response.status_code = 201

@@ -7,7 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .pipeline import run_pipeline
-from .search_config import DEFAULT_SEARCH_CONFIG, load_search_config
+from .search_config import ALLOWED_DATE_POSTED, DEFAULT_SEARCH_CONFIG, load_search_config
 from .settings import DEFAULT_CV_PATH, GITHUB_PROFILE_URL, LINKEDIN_PROFILE_URL
 
 
@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Allowed workplace arrangement; repeat for multiple (hybrid and partly-remote are equivalent; overrides config)",
     )
-    run.add_argument("--date-posted", choices=("past_24_hours", "past_week"))
+    run.add_argument("--date-posted", choices=tuple(sorted(ALLOWED_DATE_POSTED)))
     run.add_argument("--max-results", type=int)
     run.add_argument("--minimum-score", type=float, default=70.0)
     run.add_argument("--currency")
