@@ -69,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--application-format", choices=("docx", "md"), help="Generated CV and cover letter format")
     run.add_argument("--run-id", default="", help="Optional suffix to preserve multiple runs on one date")
     run.add_argument("--model", default=None, help="OpenRouter model ID (default: OPENROUTER_MODEL or openrouter/free)")
+    run.add_argument(
+        "--allow-model-change-on-resume",
+        action="store_true",
+        help="On resume, discard saved agent outputs and rerun model-backed stages using the selected model",
+    )
     return parser
 
 
@@ -136,6 +141,7 @@ def main() -> int:
             tracker_formats=args.tracker_format or output_config["tracker_formats"],
             application_format=args.application_format or output_config["application_format"],
             model=args.model,
+            allow_model_change_on_resume=args.allow_model_change_on_resume,
         )
     except Exception as exc:
         print(f"\n❌ Talent Agent stopped: {exc}", file=sys.stderr)

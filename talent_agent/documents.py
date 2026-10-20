@@ -25,6 +25,10 @@ _MODEL_COMMENTARY = re.compile(
 )
 
 
+class DocumentReviewRejectedError(ValueError):
+    """Raised when the reviewer withholds approval after the revision limit."""
+
+
 def read_cv(path: Path) -> str:
     if path.suffix.lower() == ".docx":
         doc = Document(path)
@@ -418,7 +422,7 @@ def generate_application_docs(
                     *final_report.get("cover_letter_findings", []),
                 ]
                 summary = str(final_report.get("summary", "No summary provided."))
-                raise ValueError(
+                raise DocumentReviewRejectedError(
                     f"Document Reviewer did not approve the application for "
                     f"{job['company']} — {job['title']}. {summary}"
                     + (f" Findings: {'; '.join(findings)}" if findings else "")

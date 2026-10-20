@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from .analyst import CareerAnalystAgent
-from .documents import APPLICATION_PROMPT_VERSION, generate_application_docs, read_cv
+from .documents import (
+    APPLICATION_PROMPT_VERSION,
+    DocumentReviewRejectedError,
+    generate_application_docs,
+    read_cv,
+)
 from .filters import filter_jobs
 from .llm import is_safety_metadata_only
 from .memory import read_json_object, write_json
@@ -41,6 +46,7 @@ def run_pipeline(
     tracker_html_filename: str = "tracker.html", tracker_csv_filename: str = "tracker.csv",
     tracker_formats: list[str] | None = None, application_format: str = "docx",
     model: str | None = None,
+    allow_model_change_on_resume: bool = False,
 ) -> Path:
     def say(message: str) -> None:
         print(message, flush=True)
@@ -230,10 +236,39 @@ def run_pipeline(
                 "Use the original inputs or start a new run."
             )
         if run_state.get("model") != model_name:
-            raise ValueError(
-                f"Cannot resume with model '{model_name}'; the saved run used '{run_state.get('model')}'. "
-                "Use the original model or start a new run."
+            if not allow_model_change_on_resume:
+                raise ValueError(
+                    f"Cannot resume with model '{model_name}'; the saved run used '{run_state.get('model')}'. "
+                    "Pass --allow-model-change-on-resume to rerun model-backed stages from saved listings."
+                )
+            say(
+                f"   Model changed from {run_state.get('model')} to {model_name}; "
+                "rerunning model-backed stages from the saved listings."
             )
+            for checkpoint_path, checkpoint in (
+                (researcher_path, {"version": 1, "status": "pending", "jobs": []}),
+                (analyst_path, {"version": 1, "status": "in_progress", "evaluations": []}),
+                (cv_editor_path, {
+                    "version": 1, "prompt_version": APPLICATION_PROMPT_VERSION, "outputs": {},
+                }),
+                (cover_letter_path, {
+                    "version": 1, "prompt_version": APPLICATION_PROMPT_VERSION, "outputs": {},
+                }),
+                (document_reviewer_path, {
+                    "version": 1, "prompt_version": DOCUMENT_REVIEW_VERSION, "outputs": {},
+                }),
+            ):
+                write_json(checkpoint_path, checkpoint)
+            stages = run_state.setdefault("stages", {})
+            if not isinstance(stages, dict):
+                raise ValueError(f"Invalid stage progress in {state_path}")
+            for stage in (
+                "researcher", "career_analyst", "cv_editor", "cover_letter_writer",
+                "document_reviewer", "report",
+            ):
+                stages[stage] = "pending"
+            run_state["model"] = model_name
+            write_json(state_path, run_state)
         candidate_changed = (
             saved_context.get("candidate_sha256") != expected_context["candidate_sha256"]
         )
@@ -443,6 +478,7 @@ def run_pipeline(
     else:
         set_stage("document_reviewer", "complete")
     document_reviewer: DocumentReviewerAgent | None = None
+    unapproved_applications = 0
     for index, job in enumerate(prioritized, start=1):
         say(f"\n💼 Application {index}/{len(prioritized)} · {job['title']} — {job['company']} (match {job['score']:.1f})")
         job_id = str(job["job_id"])
@@ -492,18 +528,33 @@ def run_pipeline(
             or is_safety_metadata_only(letter_text)
         ):
             letter_text = None
-        job.update(
-            generate_application_docs(
-                cv, job, candidate, output_dir / "applications", model, application_format,
-                github_url=github_url,
-                cv_text=cv_text, cover_letter_text=letter_text,
-                on_cv_generated=save_cv, on_cover_letter_generated=save_letter,
-                reviewer=document_reviewer if review_documents else None,
-                linkedin_profile=linkedin_profile,
-                review_record=review_record,
-                on_review_progress=save_review,
+        try:
+            job.update(
+                generate_application_docs(
+                    cv, job, candidate, output_dir / "applications", model, application_format,
+                    github_url=github_url,
+                    cv_text=cv_text, cover_letter_text=letter_text,
+                    on_cv_generated=save_cv, on_cover_letter_generated=save_letter,
+                    reviewer=document_reviewer if review_documents else None,
+                    linkedin_profile=linkedin_profile,
+                    review_record=review_record,
+                    on_review_progress=save_review,
+                )
             )
-        )
+        except DocumentReviewRejectedError as exc:
+            saved_review = reviewer_outputs.get(job_id)
+            if (
+                not isinstance(saved_review, dict)
+                or saved_review.get("status") != "revision_pending"
+                or not isinstance(saved_review.get("final_report"), dict)
+            ):
+                raise
+            job["document_review"] = saved_review["final_report"]
+            unapproved_applications += 1
+            say(
+                f"      ⚠ Reviewer did not approve this application; documents are withheld. "
+                f"Continuing to the next role. {exc}"
+            )
         write_json(prioritized_path, prioritized)
     cv_editor_data["outputs"] = cv_outputs
     cv_editor_data["status"] = "complete"
@@ -512,14 +563,17 @@ def run_pipeline(
     cover_letter_data["status"] = "complete"
     cover_letter_data["prompt_version"] = APPLICATION_PROMPT_VERSION
     reviewer_data["outputs"] = reviewer_outputs
-    reviewer_data["status"] = "complete"
+    reviewer_data["status"] = "in_progress" if unapproved_applications else "complete"
     reviewer_data["prompt_version"] = DOCUMENT_REVIEW_VERSION
     write_json(cv_editor_path, cv_editor_data)
     write_json(cover_letter_path, cover_letter_data)
     write_json(document_reviewer_path, reviewer_data)
     set_stage("cv_editor", "complete")
     set_stage("cover_letter_writer", "complete")
-    set_stage("document_reviewer", "complete")
+    set_stage(
+        "document_reviewer",
+        "in_progress" if unapproved_applications else "complete",
+    )
     set_stage("report", "in_progress")
     say(f"\n📊 Summary Report Writer is building {', '.join(tracker_formats or ['html', 'csv']).upper()} tracker(s)…")
     SummaryReportWriterAgent().write(
@@ -529,5 +583,10 @@ def run_pipeline(
     set_stage("report", "complete")
     if not prioritized:
         say("   No roles met the configured filters and score threshold; tracker files still contain the run summary.")
+    if unapproved_applications:
+        say(
+            f"   ⚠ {unapproved_applications} application(s) remain unapproved and have no final documents. "
+            "The run is checkpointed; resume it to apply the saved Reviewer feedback."
+        )
     say(f"\n🎉 All done. Results are in {output_dir.resolve()}")
     return output_dir

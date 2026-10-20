@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from talent_agent.analyst import CareerAnalystAgent
 from talent_agent.cli import build_parser
+from talent_agent.documents import DocumentReviewRejectedError
 from talent_agent.llm import ModelResponseError
 from talent_agent.pipeline import run_pipeline
 from talent_agent.search_config import load_search_config
@@ -445,6 +446,174 @@ class ResumeTests(unittest.TestCase):
                 "run", "--jobs", "jobs.json", "--date-posted", "past_month",
             ])
             self.assertEqual(date_args.date_posted, "past_month")
+
+    def test_resume_with_model_change_restarts_model_backed_stages(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            cv_path = root / "cv.txt"
+            cv_path.write_text("Candidate CV", encoding="utf-8")
+            jobs_path = root / "jobs.json"
+            jobs_path.write_text(
+                json.dumps([{
+                    "id": "role-1",
+                    "title": "Platform Engineer",
+                    "company": "Example Ltd",
+                    "location": "London",
+                    "employment_type": "permanent",
+                    "description": "A platform engineering role.",
+                }]),
+                encoding="utf-8",
+            )
+            output_dir = root / "outputs"
+            research = Mock()
+            research.normalize.side_effect = lambda jobs, *_: jobs
+
+            with (
+                patch("talent_agent.pipeline.ResearcherAgent", return_value=research),
+                patch("talent_agent.analyst.OpenRouterAgent") as openrouter,
+                patch("talent_agent.documents.CVEditorAgent") as cv_editor,
+                patch("talent_agent.documents.CoverLetterWriterAgent") as letter_writer,
+            ):
+                openrouter.return_value.complete.return_value = json.dumps([{
+                    "job_id": "role-1",
+                    "score": 85,
+                    "rationale": "Strong match",
+                    "missing_requirements": [],
+                }])
+                cv_editor.return_value.create.return_value = "Tailored CV text"
+                letter_writer.return_value.create.return_value = "Cover letter text"
+                run_pipeline(
+                    jobs_path=jobs_path, search=False, cv_path=cv_path,
+                    output_root=output_dir, dated_subfolders=False,
+                    tracker_formats=["csv"], application_format="md",
+                    review_documents=False, model="model/old",
+                )
+
+                research.reset_mock()
+                openrouter.reset_mock()
+                cv_editor.reset_mock()
+                letter_writer.reset_mock()
+                run_pipeline(
+                    jobs_path=None, search=False, resume_from=output_dir,
+                    cv_path=cv_path, output_root=root / "unused",
+                    dated_subfolders=False, tracker_formats=["csv"],
+                    application_format="md", review_documents=False,
+                    model="model/new", allow_model_change_on_resume=True,
+                )
+
+            research.normalize.assert_called_once()
+            openrouter.return_value.complete.assert_called_once()
+            cv_editor.return_value.create.assert_called_once()
+            letter_writer.return_value.create.assert_called_once()
+            state = json.loads(
+                (output_dir / "agent_outputs" / "run_state.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(state["model"], "model/new")
+            self.assertTrue(all(status == "complete" for status in state["stages"].values()))
+
+    def test_unapproved_application_is_withheld_and_pipeline_continues(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            cv_path = root / "cv.txt"
+            cv_path.write_text("Candidate CV", encoding="utf-8")
+            jobs_path = root / "jobs.json"
+            jobs_path.write_text(
+                json.dumps([
+                    {
+                        "id": "role-1",
+                        "title": "First Role",
+                        "company": "First Ltd",
+                        "employment_type": "permanent",
+                        "description": "First role description.",
+                    },
+                    {
+                        "id": "role-2",
+                        "title": "Second Role",
+                        "company": "Second Ltd",
+                        "employment_type": "permanent",
+                        "description": "Second role description.",
+                    },
+                ]),
+                encoding="utf-8",
+            )
+            output_dir = root / "outputs"
+            research = Mock()
+            research.normalize.side_effect = lambda jobs, *_: jobs
+            report = {
+                "cv_findings": ["Needs more evidence."],
+                "cover_letter_findings": [],
+                "summary": "Not approved.",
+                "approved": False,
+            }
+
+            def generate_docs(*args, **kwargs):
+                job = args[1]
+                if job["job_id"] == "role-1":
+                    kwargs["on_review_progress"]({
+                        "version": 4,
+                        "status": "revision_pending",
+                        "attempts": 2,
+                        "history": [report],
+                        "final_report": report,
+                        "pending_report": report,
+                    })
+                    raise DocumentReviewRejectedError("Reviewer rejected role 1.")
+                return {
+                    "cv_document": "Second_Role_CV.md",
+                    "cover_letter_document": "Second_Role_CoverLetter.md",
+                    "document_review": {
+                        "approved": True,
+                        "cv_findings": [],
+                        "cover_letter_findings": [],
+                        "summary": "Approved.",
+                    },
+                }
+
+            with (
+                patch("talent_agent.pipeline.ResearcherAgent", return_value=research),
+                patch("talent_agent.analyst.OpenRouterAgent") as openrouter,
+                patch("talent_agent.pipeline.DocumentReviewerAgent"),
+                patch(
+                    "talent_agent.pipeline.generate_application_docs",
+                    side_effect=generate_docs,
+                ) as generate,
+            ):
+                openrouter.return_value.complete.return_value = json.dumps([
+                    {
+                        "job_id": "role-1",
+                        "score": 85,
+                        "rationale": "Strong match",
+                        "missing_requirements": [],
+                    },
+                    {
+                        "job_id": "role-2",
+                        "score": 80,
+                        "rationale": "Good match",
+                        "missing_requirements": [],
+                    },
+                ])
+                run_pipeline(
+                    jobs_path=jobs_path,
+                    search=False,
+                    cv_path=cv_path,
+                    output_root=output_dir,
+                    dated_subfolders=False,
+                    tracker_formats=["csv"],
+                    application_format="md",
+                    model="model/test",
+                )
+
+            self.assertEqual(generate.call_count, 2)
+            prioritized = json.loads(
+                (output_dir / "prioritized_jobs.json").read_text(encoding="utf-8")
+            )
+            self.assertFalse(prioritized[0]["document_review"]["approved"])
+            self.assertTrue(prioritized[1]["document_review"]["approved"])
+            state = json.loads(
+                (output_dir / "agent_outputs" / "run_state.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(state["stages"]["document_reviewer"], "in_progress")
+            self.assertEqual(state["stages"]["report"], "complete")
 
     def test_reviewer_output_is_checkpointed_and_reused_on_resume(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:

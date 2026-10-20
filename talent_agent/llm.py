@@ -42,6 +42,8 @@ class OpenRouterAgent:
         json_error: ValueError | None = None
         safety_metadata_only = False
         response_problem = "empty responses"
+        reasoning_effort_none = False
+        supports_reasoning_controls = not self.model.startswith("openrouter/")
         for attempt in range(3):
             retry_prompt = prompt
             if json_error is not None:
@@ -55,14 +57,47 @@ class OpenRouterAgent:
                     "Return the requested content itself, without safety metadata."
                 )
             text = None
+            request_options = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": retry_prompt},
+                ],
+                "temperature": 0.2,
+                "max_tokens": 5000,
+            }
+            if json_output and supports_reasoning_controls:
+                request_options["response_format"] = {"type": "json_object"}
+            if reasoning_effort_none:
+                request_options["extra_body"] = {"reasoning": {"effort": "none"}}
             response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": retry_prompt}],
-                temperature=0.2,
-                max_tokens=5000,
+                **request_options,
+            )
+            finish_reason = (
+                response.choices[0].finish_reason if response.choices else "no choices"
             )
             if response.choices:
                 text = response.choices[0].message.content
+            if finish_reason == "length":
+                response_problem = "truncated responses"
+                retry_without_reasoning = (
+                    supports_reasoning_controls and not reasoning_effort_none
+                )
+                if retry_without_reasoning:
+                    reasoning_effort_none = True
+                if attempt < 2:
+                    message = (
+                        "retrying with reasoning disabled"
+                        if retry_without_reasoning
+                        else f"retrying ({attempt + 1}/2)…"
+                    )
+                    print(
+                        f"      ↻ {self.role} reached the output token limit; {message}",
+                        flush=True,
+                    )
+                    time.sleep(attempt + 1)
+                    continue
+                break
             if not text or not text.strip() or (not json_output and is_safety_metadata_only(text)):
                 safety_metadata_only = bool(text and is_safety_metadata_only(text))
                 response_problem = (
