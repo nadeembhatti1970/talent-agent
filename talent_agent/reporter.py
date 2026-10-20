@@ -21,7 +21,11 @@ class SummaryReportWriterAgent:
             review = job.get("document_review", {})
             if not isinstance(review, dict):
                 review = {}
-            findings = review.get("cv_findings", []) + review.get("cover_letter_findings", [])
+            findings = (
+                review.get("cv_findings", [])
+                + review.get("cover_letter_findings", [])
+                + review.get("non_blocking_notes", [])
+            )
             rows.append({
                 "score": job.get("score", ""), "title": job.get("title", ""),
                 "company": job.get("company", ""), "location": job.get("location", ""),

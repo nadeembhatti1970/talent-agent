@@ -45,6 +45,7 @@ class DocumentReviewerTests(unittest.TestCase):
         agent.agent.complete.return_value = json.dumps({
             "cv_findings": [],
             "cover_letter_findings": ["Unsupported metric."],
+            "non_blocking_notes": ["No direct SRE experience is listed."],
             "summary": "One claim needs review.",
         })
 
@@ -58,6 +59,7 @@ class DocumentReviewerTests(unittest.TestCase):
         )
 
         self.assertFalse(result["approved"])
+        self.assertEqual(result["non_blocking_notes"], ["No direct SRE experience is listed."])
         self.assertEqual(result["linkedin_status"], "available")
         prompt = agent.agent.complete.call_args.args[1]
         self.assertIn("master cv", prompt)
@@ -67,6 +69,29 @@ class DocumentReviewerTests(unittest.TestCase):
         self.assertIn("Treat this exact configured URL as authorized", prompt)
         self.assertIn("Never infer an additional role or dates from apparent timeline gaps", prompt)
         self.assertTrue(agent.agent.complete.call_args.kwargs["json_output"])
+
+    def test_missing_job_requirements_are_non_blocking(self) -> None:
+        agent = DocumentReviewerAgent.__new__(DocumentReviewerAgent)
+        agent.agent = Mock()
+        agent.agent.complete.return_value = json.dumps({
+            "cv_findings": [],
+            "cover_letter_findings": [],
+            "non_blocking_notes": ["No direct OpenTelemetry experience is listed."],
+            "summary": "Drafts are factually supported; one role requirement is not evidenced.",
+        })
+
+        result = agent.review(
+            "CV with related platform experience",
+            "Letter honestly describing related experience",
+            "master CV",
+            {"title": "Observability Engineer", "company": "Example Ltd"},
+            {"status": "unavailable", "text": ""},
+        )
+
+        self.assertTrue(result["approved"])
+        self.assertEqual(len(result["non_blocking_notes"]), 1)
+        prompt = agent.agent.complete.call_args.args[0]
+        self.assertIn("not deciding whether the candidate meets every job requirement", prompt)
 
 
 if __name__ == "__main__":

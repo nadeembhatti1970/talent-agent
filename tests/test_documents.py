@@ -151,8 +151,9 @@ class ApplicationDocumentTests(unittest.TestCase):
         reviewer = Mock()
         reviewer.review.return_value = {
             "approved": False,
-            "cv_findings": [],
+            "cv_findings": ["Unsupported experience claim."],
             "cover_letter_findings": [],
+            "non_blocking_notes": [],
             "summary": "Unsupported claims remain.",
         }
         job = {"job_id": "role-1", "company": "Example Ltd", "title": "Platform Engineer"}
@@ -188,14 +189,16 @@ class ApplicationDocumentTests(unittest.TestCase):
         reviewer.review.side_effect = [
             {
                 "approved": False,
-                "cv_findings": ["CV lacks evidence for the role's reliability responsibility."],
-                "cover_letter_findings": ["Letter does not name the hiring company."],
-                "summary": "Role alignment needs improvement.",
+                "cv_findings": ["CV adds an unsupported reliability ownership claim."],
+                "cover_letter_findings": ["Letter names the wrong hiring company."],
+                "non_blocking_notes": ["No direct experience with one role requirement is listed."],
+                "summary": "A factual detail needs correction.",
             },
             {
                 "approved": True,
                 "cv_findings": [],
                 "cover_letter_findings": [],
+                "non_blocking_notes": ["No direct experience with one role requirement is listed."],
                 "summary": "Both documents passed.",
             },
         ]
@@ -232,8 +235,8 @@ class ApplicationDocumentTests(unittest.TestCase):
         self.assertTrue(result["document_review"]["approved"])
         self.assertEqual(reviewer.review.call_count, 2)
         self.assertEqual(cv_agent.create.call_count, 2)
-        self.assertIn("reliability responsibility", cv_agent.create.call_args.args[3][0])
-        self.assertIn("hiring company", letter_agent.create.call_args.args[4][0])
+        self.assertIn("unsupported reliability ownership claim", cv_agent.create.call_args.args[3][0])
+        self.assertIn("wrong hiring company", letter_agent.create.call_args.args[4][0])
         self.assertTrue(any(record["status"] == "revision_pending" for record in review_progress))
         self.assertEqual(review_progress[-1]["status"], "complete")
 

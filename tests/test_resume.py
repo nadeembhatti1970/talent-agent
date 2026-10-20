@@ -540,9 +540,10 @@ class ResumeTests(unittest.TestCase):
             research = Mock()
             research.normalize.side_effect = lambda jobs, *_: jobs
             report = {
-                "cv_findings": ["Needs more evidence."],
+                "cv_findings": ["CV claims unsupported production ownership."],
                 "cover_letter_findings": [],
-                "summary": "Not approved.",
+                "non_blocking_notes": ["Candidate does not list one required skill."],
+                "summary": "An unsupported claim remains.",
                 "approved": False,
             }
 
@@ -550,7 +551,7 @@ class ResumeTests(unittest.TestCase):
                 job = args[1]
                 if job["job_id"] == "role-1":
                     kwargs["on_review_progress"]({
-                        "version": 4,
+                        "version": 5,
                         "status": "revision_pending",
                         "attempts": 2,
                         "history": [report],
