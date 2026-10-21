@@ -5,10 +5,28 @@ import os
 import unittest
 from unittest.mock import Mock, patch
 
-from talent_agent.researcher import ResearcherAgent, fetch_apify_jobs
+from talent_agent.researcher import ResearcherAgent, fetch_apify_jobs, normalize_jobs
 
 
 class ResearcherTests(unittest.TestCase):
+    def test_normalize_jobs_deduplicates_source_ids_across_tracking_urls(self) -> None:
+        records = [
+            {
+                "id": "linkedin-job-1",
+                "title": "Platform Engineer",
+                "company": "Example Ltd",
+                "location": "London",
+                "url": f"https://linkedin.com/jobs/view/platform-engineer-1?trackingId={tracking_id}",
+                "description": "Kubernetes platform role",
+            }
+            for tracking_id in ("first", "second")
+        ]
+
+        jobs = normalize_jobs(records)
+
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["job_id"], "linkedin-job-1")
+
     def test_relevance_review_batches_listings_and_returns_original_records(self) -> None:
         records = [
             {

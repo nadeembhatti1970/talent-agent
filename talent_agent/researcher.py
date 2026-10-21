@@ -14,6 +14,8 @@ import requests
 from .filters import classify_workplace_arrangement
 from .llm import OpenRouterAgent
 
+RESEARCHER_OUTPUT_VERSION = 2
+
 
 def normalize_jobs(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     jobs: list[dict[str, Any]] = []
@@ -25,8 +27,13 @@ def normalize_jobs(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         description = str(item.get("description") or item.get("descriptionText") or item.get("jobDescription") or item.get("descriptionHtml") or "").strip()
         raw_type = str(item.get("employment_type") or item.get("employmentType") or item.get("contract_type") or item.get("jobType") or item.get("type") or "").strip()
         employment_type = _employment_type(raw_type, title, description)
-        identity = url or f"{company.lower()}|{title.lower()}|{item.get('location', '')}"
-        job_id = str(item.get("job_id") or item.get("id") or hashlib.sha256(identity.encode()).hexdigest()[:16])
+        source_job_id = item.get("job_id") or item.get("id")
+        identity = (
+            f"source-id:{source_job_id}"
+            if source_job_id
+            else url or f"{company.lower()}|{title.lower()}|{item.get('location', '')}"
+        )
+        job_id = str(source_job_id or hashlib.sha256(identity.encode()).hexdigest()[:16])
         if identity in seen:
             continue
         seen.add(identity)

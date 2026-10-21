@@ -378,6 +378,30 @@ class ResumeTests(unittest.TestCase):
                 )
                 openrouter.return_value.complete.assert_not_called()
 
+            researcher_path = memory_dir / "researcher.json"
+            researcher_data = json.loads(researcher_path.read_text(encoding="utf-8"))
+            researcher_data["version"] = 1
+            researcher_path.write_text(json.dumps(researcher_data), encoding="utf-8")
+            research.normalize.reset_mock()
+            with (
+                patch("talent_agent.pipeline.ResearcherAgent", return_value=research),
+                patch("talent_agent.analyst.OpenRouterAgent") as openrouter,
+                patch("talent_agent.documents.CVEditorAgent", side_effect=AssertionError("CV Editor reran")),
+                patch("talent_agent.documents.CoverLetterWriterAgent", side_effect=AssertionError("Letter Writer reran")),
+            ):
+                run_pipeline(
+                    jobs_path=None, search=False, resume_from=output_dir, cv_path=cv_path,
+                    output_root=root / "unused", dated_subfolders=False,
+                    tracker_formats=["html"], application_format="docx",
+                    review_documents=False,
+                )
+                research.normalize.assert_called_once()
+                openrouter.return_value.complete.assert_not_called()
+            self.assertEqual(
+                json.loads(researcher_path.read_text(encoding="utf-8"))["version"],
+                2,
+            )
+
             for agent_filename in ("cv_editor.json", "cover_letter_writer.json"):
                 agent_path = memory_dir / agent_filename
                 agent_data = json.loads(agent_path.read_text(encoding="utf-8"))
@@ -551,7 +575,7 @@ class ResumeTests(unittest.TestCase):
                 job = args[1]
                 if job["job_id"] == "role-1":
                     kwargs["on_review_progress"]({
-                        "version": 5,
+                        "version": 6,
                         "status": "revision_pending",
                         "attempts": 2,
                         "history": [report],

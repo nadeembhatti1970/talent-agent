@@ -18,7 +18,12 @@ from .filters import filter_jobs
 from .llm import is_safety_metadata_only
 from .memory import read_json_object, write_json
 from .reporter import SummaryReportWriterAgent
-from .researcher import ResearcherAgent, fetch_apify_jobs, normalize_jobs
+from .researcher import (
+    RESEARCHER_OUTPUT_VERSION,
+    ResearcherAgent,
+    fetch_apify_jobs,
+    normalize_jobs,
+)
 from .reviewer import (
     DOCUMENT_REVIEW_VERSION,
     DocumentReviewerAgent,
@@ -246,7 +251,10 @@ def run_pipeline(
                 "rerunning model-backed stages from the saved listings."
             )
             for checkpoint_path, checkpoint in (
-                (researcher_path, {"version": 1, "status": "pending", "jobs": []}),
+                (
+                    researcher_path,
+                    {"version": RESEARCHER_OUTPUT_VERSION, "status": "pending", "jobs": []},
+                ),
                 (analyst_path, {"version": 1, "status": "in_progress", "evaluations": []}),
                 (cv_editor_path, {
                     "version": 1, "prompt_version": APPLICATION_PROMPT_VERSION, "outputs": {},
@@ -355,7 +363,10 @@ def run_pipeline(
         write_json(state_path or memory_dir / "run_state.json", run_state)
 
     if resume_from is None:
-        write_json(researcher_path, {"version": 1, "status": "pending", "jobs": []})
+        write_json(
+            researcher_path,
+            {"version": RESEARCHER_OUTPUT_VERSION, "status": "pending", "jobs": []},
+        )
         write_json(analyst_path, {"version": 1, "status": "in_progress", "evaluations": []})
         write_json(cv_editor_path, {
             "version": 1, "prompt_version": APPLICATION_PROMPT_VERSION, "outputs": {},
@@ -368,7 +379,10 @@ def run_pipeline(
         })
     else:
         for checkpoint_path, default in (
-            (researcher_path, {"version": 1, "status": "pending", "jobs": []}),
+            (
+                researcher_path,
+                {"version": RESEARCHER_OUTPUT_VERSION, "status": "pending", "jobs": []},
+            ),
             (analyst_path, {"version": 1, "status": "in_progress", "evaluations": []}),
             (cv_editor_path, {
                 "version": 1, "prompt_version": APPLICATION_PROMPT_VERSION, "outputs": {},
@@ -386,7 +400,10 @@ def run_pipeline(
 
     researcher_data = read_json_object(researcher_path)
     cached_relevant = researcher_data.get("jobs")
-    if researcher_data.get("status") == "complete":
+    if (
+        researcher_data.get("status") == "complete"
+        and researcher_data.get("version") == RESEARCHER_OUTPUT_VERSION
+    ):
         if not isinstance(cached_relevant, list) or not all(isinstance(job, dict) for job in cached_relevant):
             raise ValueError(f"Invalid saved Researcher output: {researcher_path}")
         relevant_jobs = cached_relevant
@@ -400,7 +417,14 @@ def run_pipeline(
             ", ".join(keywords or []) or "all provided roles",
             ", ".join(search_locations) or "any location",
         )
-        write_json(researcher_path, {"version": 1, "status": "complete", "jobs": relevant_jobs})
+        write_json(
+            researcher_path,
+            {
+                "version": RESEARCHER_OUTPUT_VERSION,
+                "status": "complete",
+                "jobs": relevant_jobs,
+            },
+        )
         set_stage("researcher", "complete")
     say(f"   {len(relevant_jobs)} listing(s) passed the relevance review.")
     filter_config = {

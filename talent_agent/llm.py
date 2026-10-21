@@ -36,7 +36,14 @@ class OpenRouterAgent:
             },
         )
 
-    def complete(self, system: str, prompt: str, *, json_output: bool = False) -> str:
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        *,
+        json_output: bool = False,
+        max_tokens: int = 5000,
+    ) -> str:
         response = None
         text = None
         json_error: ValueError | None = None
@@ -64,7 +71,7 @@ class OpenRouterAgent:
                     {"role": "user", "content": retry_prompt},
                 ],
                 "temperature": 0.2,
-                "max_tokens": 5000,
+                "max_tokens": max_tokens,
             }
             if json_output and supports_reasoning_controls:
                 request_options["response_format"] = {"type": "json_object"}

@@ -107,6 +107,15 @@ class OpenRouterAgentTests(unittest.TestCase):
             {"type": "json_object"},
         )
 
+    def test_uses_requested_output_token_budget(self) -> None:
+        agent = self.make_agent()
+        create = Mock(return_value=make_response('{"ok": true}'))
+        agent.client.chat.completions.create = create
+
+        agent.complete("system", "prompt", json_output=True, max_tokens=10000)
+
+        self.assertEqual(create.call_args.kwargs["max_tokens"], 10000)
+
 
 if __name__ == "__main__":
     unittest.main()

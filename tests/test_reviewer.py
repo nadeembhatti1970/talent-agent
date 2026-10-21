@@ -69,6 +69,7 @@ class DocumentReviewerTests(unittest.TestCase):
         self.assertIn("Treat this exact configured URL as authorized", prompt)
         self.assertIn("Never infer an additional role or dates from apparent timeline gaps", prompt)
         self.assertTrue(agent.agent.complete.call_args.kwargs["json_output"])
+        self.assertEqual(agent.agent.complete.call_args.kwargs["max_tokens"], 10000)
 
     def test_missing_job_requirements_are_non_blocking(self) -> None:
         agent = DocumentReviewerAgent.__new__(DocumentReviewerAgent)

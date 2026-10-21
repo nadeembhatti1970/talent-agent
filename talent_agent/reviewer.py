@@ -10,7 +10,7 @@ import requests
 
 from .llm import OpenRouterAgent
 
-DOCUMENT_REVIEW_VERSION = 5
+DOCUMENT_REVIEW_VERSION = 6
 MAX_LINKEDIN_PROFILE_BYTES = 2_000_000
 MAX_LINKEDIN_PROFILE_TEXT = 12_000
 
@@ -206,10 +206,11 @@ COVER LETTER TO REVIEW:
 {cover_letter}
 </generated_cover_letter>
 
-Return exactly this JSON shape, concisely:
+Return exactly this JSON shape as compact JSON, with no analysis or text outside it:
 {{"cv_findings": ["blocking factual issue"], "cover_letter_findings": ["blocking factual issue"], "non_blocking_notes": ["optional role-fit gap"], "summary": "brief result"}}
-The two findings arrays are approval-blocking and must contain only material factual issues described above. Missing or weak evidence for a job requirement, generic tailoring, or a qualification the candidate does not have is not an approval-blocking issue; put any useful observation in non_blocking_notes instead. Do not request a revision solely to cover a missing requirement. Findings arrays must be empty when there are no blocking factual issues. Include no more than six findings per document or notes overall, and keep each under 40 words. Keep the summary under 30 words. For employment-history completeness, only flag omission of a role, title, or date when that exact information is explicitly present in the master CV or LinkedIn profile. Never infer an additional role or dates from apparent timeline gaps, and do not treat an unlisted role as an omission. Do not treat an omitted historical role as a factual error unless the omission materially misrepresents the candidate's experience. Do not flag missing LinkedIn content when the profile is unavailable.""",
+The two findings arrays are approval-blocking and must contain only material factual issues described above. Missing or weak evidence for a job requirement, generic tailoring, or a qualification the candidate does not have is not an approval-blocking issue; put any useful observation in non_blocking_notes instead. Do not request a revision solely to cover a missing requirement. Findings arrays must be empty when there are no blocking factual issues. Include no more than three findings per document and three notes overall; keep each under 20 words and the summary under 15 words. For employment-history completeness, only flag omission of a role, title, or date when that exact information is explicitly present in the master CV or LinkedIn profile. Never infer an additional role or dates from apparent timeline gaps, and do not treat an unlisted role as an omission. Do not treat an omitted historical role as a factual error unless the omission materially misrepresents the candidate's experience. Do not flag missing LinkedIn content when the profile is unavailable.""",
             json_output=True,
+            max_tokens=10000,
         )
         result = json.loads(response)
         if not isinstance(result, dict):
