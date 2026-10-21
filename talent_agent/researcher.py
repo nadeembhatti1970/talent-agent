@@ -12,9 +12,9 @@ from urllib.parse import quote
 import requests
 
 from .filters import classify_workplace_arrangement
-from .llm import OpenRouterAgent
+from .llm import ModelResponseError, OpenRouterAgent
 
-RESEARCHER_OUTPUT_VERSION = 2
+RESEARCHER_OUTPUT_VERSION = 3
 
 
 def normalize_jobs(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -84,7 +84,8 @@ class ResearcherAgent:
         batch_size = 10
         batches = [normalized[index:index + batch_size] for index in range(0, len(normalized), batch_size)]
         kept_ids: set[str] = set()
-        for batch_index, batch in enumerate(batches, start=1):
+
+        def review_batch(batch: list[dict[str, Any]], batch_label: str) -> None:
             compact = [
                 {
                     key: job[key]
@@ -114,14 +115,28 @@ class ResearcherAgent:
                 if not isinstance(result, dict) or not isinstance(result.get("keep_job_ids"), list):
                     raise ValueError("Researcher response must contain a keep_job_ids array")
                 kept_ids.update(batch_ids.intersection(str(job_id) for job_id in result["keep_job_ids"]))
-            except Exception as exc:
+            except (ModelResponseError, ValueError) as exc:
+                if len(batch) > 1:
+                    midpoint = len(batch) // 2
+                    print(
+                        f"   ↻ Researcher relevance review failed for batch {batch_label} "
+                        f"({exc}); retrying as smaller batches.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    review_batch(batch[:midpoint], f"{batch_label}a")
+                    review_batch(batch[midpoint:], f"{batch_label}b")
+                    return
                 print(
-                    f"   ⚠️ Researcher relevance review failed for batch {batch_index}/{len(batches)} "
-                    f"({exc}); keeping these listings for downstream filtering.",
+                    f"   ⚠️ Researcher relevance review failed for batch {batch_label} "
+                    f"({exc}); keeping this listing for downstream filtering.",
                     file=sys.stderr,
                     flush=True,
                 )
                 kept_ids.update(batch_ids)
+
+        for batch_index, batch in enumerate(batches, start=1):
+            review_batch(batch, f"{batch_index}/{len(batches)}")
         return [job for job in normalized if job["job_id"] in kept_ids]
 
 

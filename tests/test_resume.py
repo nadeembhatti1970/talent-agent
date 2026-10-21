@@ -399,7 +399,7 @@ class ResumeTests(unittest.TestCase):
                 openrouter.return_value.complete.assert_not_called()
             self.assertEqual(
                 json.loads(researcher_path.read_text(encoding="utf-8"))["version"],
-                2,
+                3,
             )
 
             for agent_filename in ("cv_editor.json", "cover_letter_writer.json"):
@@ -575,7 +575,7 @@ class ResumeTests(unittest.TestCase):
                 job = args[1]
                 if job["job_id"] == "role-1":
                     kwargs["on_review_progress"]({
-                        "version": 6,
+                        "version": 7,
                         "status": "revision_pending",
                         "attempts": 2,
                         "history": [report],

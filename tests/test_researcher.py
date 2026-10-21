@@ -5,6 +5,7 @@ import os
 import unittest
 from unittest.mock import Mock, patch
 
+from talent_agent.llm import ModelResponseError
 from talent_agent.researcher import ResearcherAgent, fetch_apify_jobs, normalize_jobs
 
 
@@ -26,6 +27,32 @@ class ResearcherTests(unittest.TestCase):
 
         self.assertEqual(len(jobs), 1)
         self.assertEqual(jobs[0]["job_id"], "linkedin-job-1")
+
+    def test_retries_truncated_relevance_batches_as_smaller_requests(self) -> None:
+        records = [
+            {
+                "id": f"job-{index}",
+                "title": f"Platform Engineer {index}",
+                "company": "Example Ltd",
+                "location": "London",
+                "url": f"https://example.test/jobs/{index}",
+                "description": "Kubernetes platform role",
+            }
+            for index in range(4)
+        ]
+        researcher = ResearcherAgent.__new__(ResearcherAgent)
+        researcher.agent = Mock()
+        researcher.agent.complete.side_effect = [
+            ModelResponseError("truncated", "length"),
+            json.dumps({"keep_job_ids": ["job-0", "job-1"]}),
+            json.dumps({"keep_job_ids": ["job-2", "job-3"]}),
+        ]
+
+        with patch("talent_agent.researcher.time.sleep"):
+            result = researcher.normalize(records, "Platform Engineer", "London")
+
+        self.assertEqual([job["job_id"] for job in result], ["job-0", "job-1", "job-2", "job-3"])
+        self.assertEqual(researcher.agent.complete.call_count, 3)
 
     def test_relevance_review_batches_listings_and_returns_original_records(self) -> None:
         records = [

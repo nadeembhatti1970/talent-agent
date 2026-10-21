@@ -66,8 +66,8 @@ class DocumentReviewerTests(unittest.TestCase):
         self.assertIn("LinkedIn evidence", prompt)
         self.assertIn("Example Ltd", prompt)
         self.assertIn("https://github.com/example-user", prompt)
-        self.assertIn("Treat this exact configured URL as authorized", prompt)
-        self.assertIn("Never infer an additional role or dates from apparent timeline gaps", prompt)
+        self.assertIn("authorized contact", prompt)
+        self.assertIn("Never infer roles or dates from timeline gaps", prompt)
         self.assertTrue(agent.agent.complete.call_args.kwargs["json_output"])
         self.assertEqual(agent.agent.complete.call_args.kwargs["max_tokens"], 10000)
 
@@ -92,7 +92,7 @@ class DocumentReviewerTests(unittest.TestCase):
         self.assertTrue(result["approved"])
         self.assertEqual(len(result["non_blocking_notes"]), 1)
         prompt = agent.agent.complete.call_args.args[0]
-        self.assertIn("not deciding whether the candidate meets every job requirement", prompt)
+        self.assertIn("Missing qualifications, experience, or role fit are not errors", prompt)
 
 
 if __name__ == "__main__":
