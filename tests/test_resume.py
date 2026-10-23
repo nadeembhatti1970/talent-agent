@@ -267,6 +267,19 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual([job["job_id"] for job in restored], ["job-3", "job-0", "job-1", "job-2"])
         restored_analyst.agent.complete.assert_not_called()
 
+    def test_analyst_accepts_json_object_with_assessments_array(self) -> None:
+        job = {"job_id": "contract-role", "title": "Contract Engineer"}
+        analyst = CareerAnalystAgent.__new__(CareerAnalystAgent)
+        analyst.agent = Mock()
+        analyst.agent.complete.return_value = json.dumps(
+            {"assessments": [{"job_id": job["job_id"], "score": 82}]}
+        )
+
+        result = analyst.evaluate([job], "cv", {})
+
+        self.assertEqual([item["job_id"] for item in result], ["contract-role"])
+        self.assertIn('"assessments"', analyst.agent.complete.call_args.args[1])
+
     def test_analyst_splits_batch_after_truncated_response(self) -> None:
         jobs = [{"job_id": f"job-{index}", "title": f"Role {index}"} for index in range(3)]
         analyst = CareerAnalystAgent.__new__(CareerAnalystAgent)

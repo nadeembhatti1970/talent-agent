@@ -51,7 +51,7 @@ class CareerAnalystAgent:
                     compact["description"] = description[:5000] + "\n…[middle omitted]…\n" + description[-1000:]
                 compact_jobs.append(compact)
             prompt = f"""Assess each job against the candidate's verified CV and preferences.
-Use a 0-100 score with three weighted dimensions: technical overlap 50%, seniority 25%, compensation alignment 25%. If compensation is absent, score that dimension neutrally at 50. Do not infer candidate skills beyond the CV. Return JSON only, an array with each job_id, score (number), tech_overlap, seniority_match, compensation_alignment (0-100), rationale (at most two short sentences), and missing_requirements (at most five strings). Keep every assessment concise and include all IDs.
+Use a 0-100 score with three weighted dimensions: technical overlap 50%, seniority 25%, compensation alignment 25%. If compensation is absent, score that dimension neutrally at 50. Do not infer candidate skills beyond the CV. Return JSON only as an object with one key, "assessments", whose value is an array of objects. Each assessment must include job_id, score (number), tech_overlap, seniority_match, compensation_alignment (0-100), rationale (at most two short sentences), and missing_requirements (at most five strings). Keep every assessment concise and include all IDs.
 
 Minimum threshold: {minimum_score}. Candidate preferences: {json.dumps(candidate, ensure_ascii=False)}
 Candidate CV: {cv}
@@ -78,8 +78,12 @@ Jobs: {json.dumps(compact_jobs, ensure_ascii=False)}"""
                 return
 
             results = json.loads(raw)
+            if isinstance(results, dict):
+                results = results.get("assessments")
             if not isinstance(results, list):
-                raise ValueError(f"Career Analyst {batch_label} response must be a JSON array")
+                raise ValueError(
+                    f"Career Analyst {batch_label} response must contain an assessments array"
+                )
             batch_scored = 0
             for evaluation in results:
                 if not isinstance(evaluation, dict):
