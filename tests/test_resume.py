@@ -640,6 +640,85 @@ class ResumeTests(unittest.TestCase):
             self.assertEqual(state["stages"]["document_reviewer"], "in_progress")
             self.assertEqual(state["stages"]["report"], "complete")
 
+    def test_model_response_failure_is_checkpointed_and_pipeline_continues(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            cv_path = root / "cv.txt"
+            cv_path.write_text("Candidate CV", encoding="utf-8")
+            jobs_path = root / "jobs.json"
+            jobs_path.write_text(
+                json.dumps([
+                    {
+                        "id": "role-1",
+                        "title": "First Role",
+                        "company": "First Ltd",
+                        "employment_type": "permanent",
+                        "description": "First role description.",
+                    },
+                    {
+                        "id": "role-2",
+                        "title": "Second Role",
+                        "company": "Second Ltd",
+                        "employment_type": "permanent",
+                        "description": "Second role description.",
+                    },
+                ]),
+                encoding="utf-8",
+            )
+            output_dir = root / "outputs"
+            researcher = Mock()
+            researcher.normalize.side_effect = lambda jobs, *_: jobs
+            def generate_docs(*args, **kwargs):
+                job = args[1]
+                if job["job_id"] == "role-1":
+                    kwargs["on_cv_generated"]("Saved first-role CV")
+                    raise ModelResponseError(
+                        "Cover Letter Writer received only safety metadata.",
+                        "stop",
+                    )
+                return {
+                    "cv_document": "Second_Role_CV.md",
+                    "cover_letter_document": "Second_Role_CoverLetter.md",
+                }
+
+            with (
+                patch("talent_agent.pipeline.ResearcherAgent", return_value=researcher),
+                patch("talent_agent.analyst.OpenRouterAgent") as openrouter,
+                patch("talent_agent.pipeline.generate_application_docs", side_effect=generate_docs) as generate,
+                patch("talent_agent.pipeline.SummaryReportWriterAgent") as report_writer,
+            ):
+                openrouter.return_value.complete.return_value = json.dumps([
+                    {"job_id": "role-1", "score": 85, "rationale": "Strong match"},
+                    {"job_id": "role-2", "score": 80, "rationale": "Good match"},
+                ])
+                run_pipeline(
+                    jobs_path=jobs_path,
+                    search=False,
+                    cv_path=cv_path,
+                    output_root=output_dir,
+                    dated_subfolders=False,
+                    tracker_formats=["csv"],
+                    application_format="md",
+                    review_documents=False,
+                )
+                self.assertEqual(generate.call_count, 2)
+                report_writer.return_value.write.assert_called_once()
+
+            cv_checkpoint = json.loads(
+                (output_dir / "agent_outputs" / "cv_editor.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                cv_checkpoint["outputs"]["role-1"]["text"],
+                "Saved first-role CV",
+            )
+            state = json.loads(
+                (output_dir / "agent_outputs" / "run_state.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(state["stages"]["cv_editor"], "in_progress")
+            self.assertEqual(state["stages"]["cover_letter_writer"], "in_progress")
+            self.assertEqual(state["stages"]["document_reviewer"], "complete")
+            self.assertEqual(state["stages"]["report"], "complete")
+
     def test_reviewer_output_is_checkpointed_and_reused_on_resume(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             root = Path(temporary_dir)

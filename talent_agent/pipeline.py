@@ -15,7 +15,7 @@ from .documents import (
     read_cv,
 )
 from .filters import filter_jobs
-from .llm import is_safety_metadata_only
+from .llm import ModelResponseError, is_safety_metadata_only
 from .memory import read_json_object, write_json
 from .reporter import SummaryReportWriterAgent
 from .researcher import (
@@ -503,6 +503,7 @@ def run_pipeline(
         set_stage("document_reviewer", "complete")
     document_reviewer: DocumentReviewerAgent | None = None
     unapproved_applications = 0
+    incomplete_applications = 0
     for index, job in enumerate(prioritized, start=1):
         say(f"\n💼 Application {index}/{len(prioritized)} · {job['title']} — {job['company']} (match {job['score']:.1f})")
         job_id = str(job["job_id"])
@@ -579,6 +580,12 @@ def run_pipeline(
                 f"      ⚠ Reviewer did not approve this application; documents are withheld. "
                 f"Continuing to the next role. {exc}"
             )
+        except ModelResponseError as exc:
+            incomplete_applications += 1
+            say(
+                f"      ⚠ {exc} This application remains checkpointed; "
+                "continuing to the next role."
+            )
         write_json(prioritized_path, prioritized)
     cv_editor_data["outputs"] = cv_outputs
     cv_editor_data["status"] = "complete"
@@ -587,16 +594,23 @@ def run_pipeline(
     cover_letter_data["status"] = "complete"
     cover_letter_data["prompt_version"] = APPLICATION_PROMPT_VERSION
     reviewer_data["outputs"] = reviewer_outputs
-    reviewer_data["status"] = "in_progress" if unapproved_applications else "complete"
+    reviewer_pending = review_documents and (
+        unapproved_applications or incomplete_applications
+    )
+    reviewer_data["status"] = "in_progress" if reviewer_pending else "complete"
     reviewer_data["prompt_version"] = DOCUMENT_REVIEW_VERSION
     write_json(cv_editor_path, cv_editor_data)
     write_json(cover_letter_path, cover_letter_data)
     write_json(document_reviewer_path, reviewer_data)
-    set_stage("cv_editor", "complete")
-    set_stage("cover_letter_writer", "complete")
+    application_stages_complete = incomplete_applications == 0
+    set_stage("cv_editor", "complete" if application_stages_complete else "in_progress")
+    set_stage(
+        "cover_letter_writer",
+        "complete" if application_stages_complete else "in_progress",
+    )
     set_stage(
         "document_reviewer",
-        "in_progress" if unapproved_applications else "complete",
+        "in_progress" if reviewer_pending else "complete",
     )
     set_stage("report", "in_progress")
     say(f"\n📊 Summary Report Writer is building {', '.join(tracker_formats or ['html', 'csv']).upper()} tracker(s)…")
@@ -611,6 +625,11 @@ def run_pipeline(
         say(
             f"   ⚠ {unapproved_applications} application(s) remain unapproved and have no final documents. "
             "The run is checkpointed; resume it to apply the saved Reviewer feedback."
+        )
+    if incomplete_applications:
+        say(
+            f"   ⚠ {incomplete_applications} application(s) could not finish because a model response failed. "
+            "Completed drafts are checkpointed; resume the run to retry the incomplete applications."
         )
     say(f"\n🎉 All done. Results are in {output_dir.resolve()}")
     return output_dir
