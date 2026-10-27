@@ -42,10 +42,13 @@ class CareerAnalystAgent:
         ) -> None:
             pending_ids = {job["job_id"] for job in batch}
             compact_jobs = []
-            for job in batch:
+            # Numeric IDs can be redacted by model providers (e.g. as phone numbers), so use aliases.
+            aliases = {f"J{index}": job["job_id"] for index, job in enumerate(batch, start=1)}
+            for alias, job in zip(aliases, batch):
                 compact = {key: job.get(key, "") for key in (
-                    "job_id", "title", "company", "location", "salary", "employment_type", "description",
+                    "title", "company", "location", "salary", "employment_type", "description",
                 )}
+                compact = {"job_id": alias, **compact}
                 description = str(compact["description"])
                 if len(description) > 6000:
                     compact["description"] = description[:5000] + "\n…[middle omitted]…\n" + description[-1000:]
@@ -88,14 +91,15 @@ Jobs: {json.dumps(compact_jobs, ensure_ascii=False)}"""
             for evaluation in results:
                 if not isinstance(evaluation, dict):
                     continue
-                job_id = str(evaluation.get("job_id", ""))
+                returned_id = str(evaluation.get("job_id", "")).strip()
+                job_id = aliases.get(returned_id, returned_id)
                 if job_id not in pending_ids:
                     continue
                 try:
                     score = max(0.0, min(100.0, float(evaluation["score"])))
                 except (KeyError, TypeError, ValueError):
                     continue
-                evaluations[job_id] = {**evaluation, "score": round(score, 1)}
+                evaluations[job_id] = {**evaluation, "job_id": job_id, "score": round(score, 1)}
                 batch_scored += 1
             print(f"      ✓ Scored {batch_scored}/{len(batch)} roles in batch {batch_label}.", flush=True)
             if on_checkpoint:

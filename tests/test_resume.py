@@ -280,6 +280,19 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual([item["job_id"] for item in result], ["contract-role"])
         self.assertIn('"assessments"', analyst.agent.complete.call_args.args[1])
 
+    def test_analyst_sends_aliases_and_maps_them_back_to_job_ids(self) -> None:
+        job = {"job_id": "4481458850", "title": "Contract Engineer"}
+        analyst = CareerAnalystAgent.__new__(CareerAnalystAgent)
+        analyst.agent = Mock()
+        analyst.agent.complete.return_value = json.dumps(
+            {"assessments": [{"job_id": "J1", "score": 82}]}
+        )
+
+        result = analyst.evaluate([job], "cv", {})
+
+        self.assertEqual([item["job_id"] for item in result], ["4481458850"])
+        self.assertNotIn("4481458850", analyst.agent.complete.call_args.args[1])
+
     def test_analyst_splits_batch_after_truncated_response(self) -> None:
         jobs = [{"job_id": f"job-{index}", "title": f"Role {index}"} for index in range(3)]
         analyst = CareerAnalystAgent.__new__(CareerAnalystAgent)
@@ -412,7 +425,7 @@ class ResumeTests(unittest.TestCase):
                 openrouter.return_value.complete.assert_not_called()
             self.assertEqual(
                 json.loads(researcher_path.read_text(encoding="utf-8"))["version"],
-                3,
+                4,
             )
 
             for agent_filename in ("cv_editor.json", "cover_letter_writer.json"):

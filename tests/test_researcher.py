@@ -44,8 +44,8 @@ class ResearcherTests(unittest.TestCase):
         researcher.agent = Mock()
         researcher.agent.complete.side_effect = [
             ModelResponseError("truncated", "length"),
-            json.dumps({"keep_job_ids": ["job-0", "job-1"]}),
-            json.dumps({"keep_job_ids": ["job-2", "job-3"]}),
+            json.dumps({"drop_job_ids": []}),
+            json.dumps({"drop_job_ids": []}),
         ]
 
         with patch("talent_agent.researcher.time.sleep"):
@@ -78,7 +78,7 @@ class ResearcherTests(unittest.TestCase):
             listings_text = prompt.split("Listings: ", maxsplit=1)[1]
             batch = json.loads(listings_text)
             reviewed_batches.append(batch)
-            return json.dumps({"keep_job_ids": [batch[0]["job_id"]]})
+            return json.dumps({"drop_job_ids": [job["job_id"] for job in batch[1:]]})
 
         researcher.agent.complete.side_effect = keep_first_job
 
@@ -91,6 +91,21 @@ class ResearcherTests(unittest.TestCase):
         )
         self.assertEqual(result[0]["description"], records[0]["description"].strip())
         self.assertLessEqual(len(reviewed_batches[0][0]["description"]), 1600)
+
+    def test_relevance_review_uses_aliases_for_numeric_ids(self) -> None:
+        records = [
+            {"id": str(4481458850 + index), "title": f"Platform Engineer {index}", "company": "Example Ltd",
+             "location": "London", "url": f"https://example.test/jobs/{index}", "description": "Kubernetes role"}
+            for index in range(2)
+        ]
+        researcher = ResearcherAgent.__new__(ResearcherAgent)
+        researcher.agent = Mock()
+        researcher.agent.complete.return_value = json.dumps({"drop_job_ids": ["J2"]})
+
+        result = researcher.normalize(records, "Platform Engineer", "London")
+
+        self.assertEqual([job["job_id"] for job in result], ["4481458850"])
+        self.assertNotIn("4481458850", researcher.agent.complete.call_args.args[1])
 
     def test_unlimited_apify_request_omits_result_limit_parameters(self) -> None:
         run_response = Mock()
