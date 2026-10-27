@@ -8,7 +8,7 @@ from docx import Document
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
-from .llm import OpenRouterAgent, is_safety_metadata_only
+from .llm import ModelResponseError, OpenRouterAgent, is_safety_metadata_only
 from .reviewer import DOCUMENT_REVIEW_VERSION, DocumentReviewerAgent
 
 APPLICATION_PROMPT_VERSION = 4
@@ -81,10 +81,42 @@ def _write_docx(path: Path, content: str) -> None:
     document.save(path)
 
 
+# Providers can redact names/addresses in model output as tokens such as [PERSON_NAME].
+_REDACTION_PLACEHOLDER = re.compile(r"\[[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\]|\[(?:ADDRESS|PHONE|EMAIL|NAME|URL)\]")
+
+
+def _restore_redactions(text: str, master_cv: str) -> str:
+    """Replace provider redaction tokens with values that the master CV itself supports."""
+    email = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", master_cv)
+    phone = re.search(r"\+\(?\d{2}\)?[\d ]{9,}\d", master_cv)
+    if email:
+        text = re.sub(r"\[(?:EMAIL|EMAIL_ADDRESS)\]", email.group(0), text)
+    if phone:
+        text = re.sub(r"\[(?:PHONE|PHONE_NUMBER)\]", re.sub(r"[()]", "", phone.group(0)).strip(), text)
+    # The master CV has no postal address, so drop address segments from contact lines.
+    text = re.sub(r"\[ADDRESS\][^|\n]*(?:\|\s*)?", "", text)
+
+    def restore_name(match: re.Match[str]) -> str:
+        before = text[: match.start()].split()[-1:] if text[: match.start()].strip() else []
+        if before and not before[0].startswith("["):
+            found = re.search(rf"\b{re.escape(before[0])}\s+([A-Z][\w'-]+)", master_cv)
+            if found:
+                return found.group(1)
+        return match.group(0)
+
+    return _REDACTION_PLACEHOLDER.sub(restore_name, text)
+
+
 def _prepare_application_text(text: str, document_type: str, github_url: str) -> str:
     if is_safety_metadata_only(text):
         raise ValueError(
             f"{document_type} draft contains only safety metadata instead of document content"
+        )
+    placeholder = _REDACTION_PLACEHOLDER.search(text)
+    if placeholder:
+        raise ValueError(
+            f"{document_type} draft contains the redaction placeholder {placeholder.group(0)}; "
+            "write the real employer names, links and contact details from the master CV"
         )
     if _MODEL_COMMENTARY.search(text):
         raise ValueError(
@@ -252,11 +284,12 @@ def generate_application_docs(
                     if retry_feedback
                     else editor.create(cv, job, github_url)
                 )
-                return _prepare_application_text(draft, "cv", github_url)
+                return _prepare_application_text(_restore_redactions(draft, cv), "cv", github_url)
             except ValueError as exc:
                 if attempt:
-                    raise ValueError(
-                        f"CV Editor returned invalid document content after retry: {exc}"
+                    raise ModelResponseError(
+                        f"CV Editor returned invalid document content after retry: {exc}",
+                        "invalid_content",
                     ) from exc
                 retry_feedback.append(
                     f"The previous response was rejected: {exc}. Return only the finished CV, "
@@ -274,11 +307,14 @@ def generate_application_docs(
                     if retry_feedback
                     else writer.create(cv, job, candidate, github_url)
                 )
-                return _prepare_application_text(draft, "cover_letter", github_url)
+                return _prepare_application_text(
+                    _restore_redactions(draft, cv), "cover_letter", github_url
+                )
             except ValueError as exc:
                 if attempt:
-                    raise ValueError(
-                        f"Cover Letter Writer returned invalid document content after retry: {exc}"
+                    raise ModelResponseError(
+                        f"Cover Letter Writer returned invalid document content after retry: {exc}",
+                        "invalid_content",
                     ) from exc
                 retry_feedback.append(
                     f"The previous response was rejected: {exc}. Return only the finished letter, "

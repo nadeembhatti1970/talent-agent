@@ -143,6 +143,56 @@ class ApplicationDocumentTests(unittest.TestCase):
         self.assertEqual(cv_agent.create.call_count, 2)
         self.assertIn("no analysis", cv_agent.create.call_args.args[3][-1])
 
+    def test_redaction_placeholders_are_rejected_and_regenerated(self) -> None:
+        cv_agent = Mock()
+        cv_agent.create.side_effect = [
+            "Nadeem Bhatti\n[PERSON_NAME] — DevOps Engineer, Jan 2016–May 2017",
+            "Nadeem Bhatti\nYorkshire Building Society — DevOps Engineer",
+        ]
+        letter_agent = Mock()
+        letter_agent.create.return_value = "Dear Hiring Manager,\n\nI built Kubernetes platforms."
+        job = {"job_id": "role-1", "company": "Example Ltd", "title": "Platform Engineer"}
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            with (
+                patch("talent_agent.documents.CVEditorAgent", return_value=cv_agent),
+                patch("talent_agent.documents.CoverLetterWriterAgent", return_value=letter_agent),
+            ):
+                result = generate_application_docs(
+                    "Master CV", job, {}, Path(temporary_dir), output_format="md"
+                )
+            cv_content = (Path(temporary_dir) / result["cv_document"]).read_text()
+
+        self.assertNotIn("[PERSON_NAME]", cv_content)
+        self.assertEqual(cv_agent.create.call_count, 2)
+        self.assertIn("[PERSON_NAME]", cv_agent.create.call_args.args[3][-1])
+
+    def test_redacted_contact_details_are_restored_from_master_cv(self) -> None:
+        master = "Nadeem\n+(44) 7415 166997 ~ mailto:HYPERLINK \"x\"nad@example.com\nFair Isaac International, Birmingham"
+        cv_agent = Mock()
+        cv_agent.create.return_value = (
+            "Nadeem Bhatti\n[ADDRESS], OH | +44 7415 166997 | [EMAIL] | LinkedIn\n"
+            "Technical Consultant | Fair [PERSON_NAME] – Birmingham"
+        )
+        letter_agent = Mock()
+        letter_agent.create.return_value = "Dear Hiring Manager,\n\nHello."
+        job = {"job_id": "role-1", "company": "Example Ltd", "title": "Platform Engineer"}
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            with (
+                patch("talent_agent.documents.CVEditorAgent", return_value=cv_agent),
+                patch("talent_agent.documents.CoverLetterWriterAgent", return_value=letter_agent),
+            ):
+                result = generate_application_docs(
+                    master, job, {}, Path(temporary_dir), output_format="md"
+                )
+            cv_content = (Path(temporary_dir) / result["cv_document"]).read_text()
+
+        self.assertIn("nad@example.com", cv_content)
+        self.assertIn("Fair Isaac – Birmingham", cv_content)
+        self.assertNotIn("[", cv_content)
+        self.assertEqual(cv_agent.create.call_count, 1)
+
     def test_unapproved_review_does_not_write_application_documents(self) -> None:
         cv_agent = Mock()
         cv_agent.create.return_value = "Nadeem Bhatti\nPlatform engineer."

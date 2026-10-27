@@ -8,6 +8,50 @@ import time
 from openai import OpenAI
 
 
+class UsageTracker:
+    """Accumulates token usage and cost reported by OpenRouter across all agent calls."""
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.calls = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.reasoning_tokens = 0
+        self.cost = 0.0
+        self.cost_reported = False
+
+    def record(self, usage: object) -> None:
+        self.calls += 1
+        if usage is None:
+            return
+        self.input_tokens += int(getattr(usage, "prompt_tokens", 0) or 0)
+        self.output_tokens += int(getattr(usage, "completion_tokens", 0) or 0)
+        details = getattr(usage, "completion_tokens_details", None)
+        self.reasoning_tokens += int(getattr(details, "reasoning_tokens", 0) or 0)
+        cost = getattr(usage, "cost", None)
+        if cost is None and isinstance(getattr(usage, "model_extra", None), dict):
+            cost = usage.model_extra.get("cost")
+        if isinstance(cost, (int, float)):
+            self.cost += float(cost)
+            self.cost_reported = True
+
+    def summary(self) -> str:
+        text = (
+            f"{self.calls} model call(s), {self.input_tokens:,} input / "
+            f"{self.output_tokens:,} output tokens"
+        )
+        if self.reasoning_tokens:
+            text += f" (including {self.reasoning_tokens:,} reasoning)"
+        if self.cost_reported:
+            text += f"; cost ${self.cost:.4f}"
+        return text
+
+
+usage_tracker = UsageTracker()
+
+
 class ModelResponseError(RuntimeError):
     def __init__(self, message: str, finish_reason: str) -> None:
         super().__init__(message)
@@ -77,9 +121,11 @@ class OpenRouterAgent:
                 request_options["response_format"] = {"type": "json_object"}
             if reasoning_effort_none:
                 request_options["extra_body"] = {"reasoning": {"effort": "none"}}
+            request_options.setdefault("extra_body", {})["usage"] = {"include": True}
             response = self.client.chat.completions.create(
                 **request_options,
             )
+            usage_tracker.record(getattr(response, "usage", None))
             finish_reason = (
                 response.choices[0].finish_reason if response.choices else "no choices"
             )

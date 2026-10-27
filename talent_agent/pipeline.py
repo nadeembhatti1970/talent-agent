@@ -15,7 +15,7 @@ from .documents import (
     read_cv,
 )
 from .filters import filter_jobs
-from .llm import ModelResponseError, is_safety_metadata_only
+from .llm import ModelResponseError, is_safety_metadata_only, usage_tracker
 from .memory import read_json_object, write_json
 from .reporter import SummaryReportWriterAgent
 from .researcher import (
@@ -67,6 +67,7 @@ def run_pipeline(
     search_locations = locations if locations is not None else ([location] if location.strip() else [""])
     search_locations = [value.strip() for value in search_locations if value.strip()] or [""]
     model_name = model or os.getenv("OPENROUTER_MODEL", "openrouter/free")
+    usage_tracker.reset()
     say(f"\n🚀 Talent Agent is starting with {model_name}.")
     say(f"📄 Candidate CV loaded from {cv_path}.")
     candidate: dict[str, Any] = {
@@ -631,5 +632,6 @@ def run_pipeline(
             f"   ⚠ {incomplete_applications} application(s) could not finish because a model response failed. "
             "Completed drafts are checkpointed; resume the run to retry the incomplete applications."
         )
+    say(f"\n💰 Model usage this run: {usage_tracker.summary()}.")
     say(f"\n🎉 All done. Results are in {output_dir.resolve()}")
     return output_dir

@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from talent_agent.llm import OpenRouterAgent
+from talent_agent.llm import OpenRouterAgent, UsageTracker
 
 
 def make_response(content: str, finish_reason: str = "stop") -> SimpleNamespace:
@@ -89,11 +89,23 @@ class OpenRouterAgentTests(unittest.TestCase):
             result = agent.complete("system", "prompt")
 
         self.assertEqual(result, "Finished CV")
-        self.assertNotIn("extra_body", create.call_args_list[0].kwargs)
+        self.assertNotIn("reasoning", create.call_args_list[0].kwargs["extra_body"])
         self.assertEqual(
             create.call_args_list[1].kwargs["extra_body"],
-            {"reasoning": {"effort": "none"}},
+            {"reasoning": {"effort": "none"}, "usage": {"include": True}},
         )
+
+    def test_usage_tracker_accumulates_tokens_and_cost(self) -> None:
+        tracker = UsageTracker()
+        tracker.record(SimpleNamespace(
+            prompt_tokens=1000, completion_tokens=200, cost=0.0003,
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=50),
+        ))
+        tracker.record(SimpleNamespace(prompt_tokens=500, completion_tokens=100))
+
+        self.assertEqual((tracker.calls, tracker.input_tokens, tracker.output_tokens), (2, 1500, 300))
+        self.assertIn("cost $0.0003", tracker.summary())
+        self.assertIn("50 reasoning", tracker.summary())
 
     def test_requests_json_object_from_explicit_models(self) -> None:
         agent = self.make_agent()
