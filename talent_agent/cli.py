@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    load_dotenv()
+    load_dotenv(override=True)
     parser = build_parser()
     args = parser.parse_args()
     try:
