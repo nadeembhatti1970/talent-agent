@@ -25,6 +25,9 @@ _MODEL_COMMENTARY = re.compile(
 )
 
 
+MAX_REVIEW_ROUNDS = 4
+
+
 class DocumentReviewRejectedError(ValueError):
     """Raised when the reviewer withholds approval after the revision limit."""
 
@@ -420,7 +423,7 @@ def generate_application_docs(
             if not isinstance(history, list):
                 raise ValueError("Saved document reviewer history must be a JSON array")
             reviewer_agent = reviewer
-            while reviews_this_run < 2:
+            while reviews_this_run < MAX_REVIEW_ROUNDS:
                 report = reviewer_agent.review(
                     cv_text, cover_letter_text, cv, job, profile, github_url=github_url
                 )
@@ -442,7 +445,7 @@ def generate_application_docs(
                 current_review["status"] = "revision_pending"
                 current_review["pending_report"] = report
                 save_review_progress()
-                if reviews_this_run == 2:
+                if reviews_this_run == MAX_REVIEW_ROUNDS:
                     break
                 apply_feedback(report)
                 current_review["status"] = "in_progress"

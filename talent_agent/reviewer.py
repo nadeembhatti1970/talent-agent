@@ -10,7 +10,7 @@ import requests
 
 from .llm import OpenRouterAgent
 
-DOCUMENT_REVIEW_VERSION = 7
+DOCUMENT_REVIEW_VERSION = 8
 MAX_LINKEDIN_PROFILE_BYTES = 2_000_000
 MAX_LINKEDIN_PROFILE_TEXT = 12_000
 
@@ -189,7 +189,7 @@ COVER LETTER DRAFT:
 
 Return exactly this compact JSON shape:
 {{"cv_findings": ["blocking factual issue"], "cover_letter_findings": ["blocking factual issue"], "non_blocking_notes": ["optional role-fit gap"], "summary": "brief result"}}
-The findings arrays block approval and may contain only material factual errors. Missing or weak evidence for any job requirement, generic tailoring, or lack of a qualification is non-blocking; mention it only in non_blocking_notes and never ask the writer to imply unsupported experience. Keep each array to at most three concise items; each item and summary must be under 20 words. Only flag an omitted role, title, or date if explicitly present in the supplied evidence and its omission materially misrepresents experience. Never infer roles or dates from timeline gaps. A configured GitHub URL is authorized contact information. Do not flag missing LinkedIn evidence when unavailable.""",
+The findings arrays block approval and may contain only material factual errors. Missing or weak evidence for any job requirement, generic tailoring, or lack of a qualification is non-blocking; mention it only in non_blocking_notes and never ask the writer to imply unsupported experience. Keep each array to at most three concise items; each item and summary must be under 20 words. Only flag an omitted role, title, or date if explicitly present in the supplied evidence and its omission materially misrepresents experience. Never infer roles or dates from timeline gaps. A configured GitHub URL is authorized contact information. Do not flag missing LinkedIn evidence when unavailable. Redaction tokens such as [PERSON_NAME], [EMAIL] or [PHONE] in the supplied evidence are privacy artefacts: ignore them and never cite them as findings. Do not flag a rounded or approximate duration (for example 'over twelve years') when the evidence spans roughly that length, nor a job title the cover letter takes from the job advert. Flag only claims that clearly contradict the evidence, and never repeat a finding the writer has already corrected.""",
             json_output=True,
             max_tokens=10000,
         )

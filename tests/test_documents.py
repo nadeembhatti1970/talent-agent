@@ -227,7 +227,7 @@ class ApplicationDocumentTests(unittest.TestCase):
 
             self.assertEqual(list(Path(temporary_dir).glob("*.md")), [])
 
-        self.assertEqual(reviewer.review.call_count, 2)
+        self.assertEqual(reviewer.review.call_count, 4)
         self.assertEqual(progress[-1]["status"], "revision_pending")
 
     def test_reviewer_feedback_triggers_one_revision_and_a_final_review(self) -> None:
