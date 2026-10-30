@@ -137,18 +137,28 @@ def run_pipeline(
     else:
         if search:
             location_results: list[list[dict[str, Any]]] = []
-            for search_location in search_locations:
+            # One search per keyword and employment type: the actor ranks free text, so
+            # the type must be part of the query for contract roles to surface.
+            queries = [
+                f"{keyword.strip()} {employment_type}"
+                for keyword in keywords or []
+                if keyword.strip()
+                for employment_type in employment_types or ["contract", "permanent"]
+            ]
+            for query, search_location in (
+                (query, location) for query in queries for location in search_locations
+            ):
                 limit_text = (
                     f"up to {max_results} results"
                     if max_results is not None
                     else "without a configured result limit"
                 )
                 say(
-                    f"\n🔎 Researcher is searching Apify for {', '.join(keywords or [])} "
+                    f"\n🔎 Researcher is searching Apify for '{query}' "
                     f"in {search_location or 'any location'} ({limit_text})…"
                 )
                 location_jobs = fetch_apify_jobs(
-                    ", ".join(keywords or []), search_location, date_posted, max_results
+                    query, search_location, date_posted, max_results
                 )
                 location_results.append(
                     location_jobs if max_results is None else location_jobs[:max_results]

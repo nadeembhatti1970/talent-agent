@@ -107,6 +107,7 @@ class ResumeTests(unittest.TestCase):
                     cv_path=cv_path,
                     locations=["London", "Manchester"],
                     keywords=["Platform Engineer"],
+                    employment_types=["contract"],
                     max_results=4,
                     output_root=root / "outputs",
                     dated_subfolders=False,
@@ -148,7 +149,7 @@ class ResumeTests(unittest.TestCase):
                 patch("talent_agent.pipeline.SummaryReportWriterAgent"),
             ):
                 output_dir = run_pipeline(
-                    jobs_path=None, search=True, cv_path=cv_path,
+                    jobs_path=None, search=True, cv_path=cv_path, employment_types=["permanent"],
                     locations=["London", "Manchester"], keywords=["Platform Engineer"],
                     max_results=4, output_root=root / "outputs", dated_subfolders=False,
                     tracker_formats=["csv"],
@@ -188,7 +189,7 @@ class ResumeTests(unittest.TestCase):
                 patch("talent_agent.pipeline.SummaryReportWriterAgent"),
             ):
                 output_dir = run_pipeline(
-                    jobs_path=None, search=True, cv_path=cv_path,
+                    jobs_path=None, search=True, cv_path=cv_path, employment_types=["permanent"],
                     locations=["London", "Manchester"], keywords=["Platform Engineer"],
                     max_results=50, output_root=root / "outputs", dated_subfolders=False,
                     tracker_formats=["csv"],
@@ -199,6 +200,41 @@ class ResumeTests(unittest.TestCase):
             self.assertEqual([call.args[3] for call in fetch.call_args_list], [50, 50])
             self.assertEqual(sum(job["job_id"].startswith("london-") for job in raw_jobs), 50)
             self.assertEqual(sum(job["job_id"].startswith("manchester-") for job in raw_jobs), 50)
+
+    def test_search_runs_each_keyword_and_employment_type_in_each_location(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            cv_path = root / "cv.txt"
+            cv_path.write_text("Candidate CV", encoding="utf-8")
+            counter = iter(range(100))
+            fetch = Mock(side_effect=lambda *a: [
+                {"id": f"job-{next(counter)}", "title": "Platform Engineer", "company": "Example Ltd",
+                 "employment_type": "contract", "description": "Platform role."}
+            ])
+            researcher = Mock()
+            researcher.normalize.side_effect = lambda jobs, *_: jobs
+            analyst = Mock()
+            analyst.evaluate.return_value = []
+            with (
+                patch("talent_agent.pipeline.fetch_apify_jobs", fetch),
+                patch("talent_agent.pipeline.ResearcherAgent", return_value=researcher),
+                patch("talent_agent.pipeline.CareerAnalystAgent", return_value=analyst),
+                patch("talent_agent.pipeline.SummaryReportWriterAgent"),
+            ):
+                output_dir = run_pipeline(
+                    jobs_path=None, search=True, cv_path=cv_path,
+                    locations=["London", "Leeds"], keywords=["DevOps", "SRE"],
+                    employment_types=["contract"],
+                    max_results=10, output_root=root / "outputs", dated_subfolders=False,
+                    tracker_formats=["csv"],
+                )
+            self.assertEqual(
+                [(call.args[0], call.args[1]) for call in fetch.call_args_list],
+                [("DevOps contract", "London"), ("DevOps contract", "Leeds"),
+                 ("SRE contract", "London"), ("SRE contract", "Leeds")],
+            )
+            raw_jobs = json.loads((output_dir / "raw_jobs.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(raw_jobs), 4)
 
     def test_null_max_results_does_not_cap_each_location_or_combined_results(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -230,7 +266,7 @@ class ResumeTests(unittest.TestCase):
                 patch("talent_agent.pipeline.SummaryReportWriterAgent"),
             ):
                 output_dir = run_pipeline(
-                    jobs_path=None, search=True, cv_path=cv_path,
+                    jobs_path=None, search=True, cv_path=cv_path, employment_types=["permanent"],
                     locations=["London", "Manchester"], keywords=["Platform Engineer"],
                     max_results=None, output_root=root / "outputs", dated_subfolders=False,
                     tracker_formats=["csv"],
