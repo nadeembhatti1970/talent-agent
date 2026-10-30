@@ -77,6 +77,11 @@ def load_search_config(path: Path = DEFAULT_SEARCH_CONFIG) -> dict[str, Any]:
     for key in ("review_documents", "review_linkedin_profile"):
         if not isinstance(config[key], bool):
             raise ValueError(f"{key} must be true or false")
+    config.setdefault("allowed_location_terms", [])
+    if not isinstance(config["allowed_location_terms"], list) or not all(
+        isinstance(term, str) for term in config["allowed_location_terms"]
+    ):
+        raise ValueError("allowed_location_terms must be an array of strings")
     config.setdefault("exclude_security_clearance", False)
     if not isinstance(config["exclude_security_clearance"], bool):
         raise ValueError("exclude_security_clearance must be true or false")

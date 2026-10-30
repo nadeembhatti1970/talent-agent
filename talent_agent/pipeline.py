@@ -22,6 +22,7 @@ from .researcher import (
     RESEARCHER_OUTPUT_VERSION,
     ResearcherAgent,
     fetch_apify_jobs,
+    filter_by_location,
     normalize_jobs,
 )
 from .reviewer import (
@@ -43,6 +44,7 @@ def run_pipeline(
     minimum_day_rate: float | None = None, minimum_annual_salary: float | None = None,
     exclude_unknown_compensation: bool = False, exclude_security_clearance: bool = False,
     include_unknown_contract_compensation: bool | None = None,
+    allowed_location_terms: list[str] | None = None,
     linkedin_url: str = "", github_url: str = "",
     review_documents: bool = True, review_linkedin_profile: bool = True,
     output_root: Path = Path("outputs"), run_id: str = "",
@@ -153,11 +155,7 @@ def run_pipeline(
                 )
             raw = [
                 jobs[index]
-                for index in range(
-                    max((len(jobs) for jobs in location_results), default=0)
-                    if max_results is None
-                    else max_results
-                )
+                for index in range(max((len(jobs) for jobs in location_results), default=0))
                 for jobs in location_results
                 if index < len(jobs)
             ]
@@ -170,7 +168,12 @@ def run_pipeline(
         if max_results is not None and not search and len(raw) > max_results:
             raw = raw[:max_results]
         raw_jobs = normalize_jobs(raw)
-        if max_results is not None and len(raw_jobs) > max_results:
+        if allowed_location_terms:
+            before = len(raw_jobs)
+            raw_jobs = filter_by_location(raw_jobs, allowed_location_terms)
+            if before != len(raw_jobs):
+                say(f"   🌍 Dropped {before - len(raw_jobs)} listing(s) outside the allowed locations.")
+        if max_results is not None and not search and len(raw_jobs) > max_results:
             raw_jobs = raw_jobs[:max_results]
         raw_path = output_dir / raw_jobs_filename
         write_json(raw_path, raw_jobs)

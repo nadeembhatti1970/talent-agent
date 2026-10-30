@@ -127,6 +127,7 @@ def main() -> int:
                 "include_unknown_contract_compensation", not exclude_unknown
             ),
             exclude_security_clearance=exclude_security_clearance,
+            allowed_location_terms=config.get("allowed_location_terms"),
             review_documents=review_documents,
             review_linkedin_profile=review_linkedin_profile,
             linkedin_url=args.linkedin_url,

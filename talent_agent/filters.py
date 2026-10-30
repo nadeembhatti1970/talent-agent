@@ -34,6 +34,11 @@ _CLEARANCE_REQUIRED_PATTERNS = (
         r"(?:clearance|vetting|eligibility)\b",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"\b(?:SC|DV|CTC)[\s-]+(?:cleared|vetted)\b"
+        r"(?![^.\n]{0,40}\b(?:desirable|preferred|advantageous|beneficial|nice\s+to\s+have)\b)",
+        re.IGNORECASE,
+    ),
 )
 _WORKPLACE_ARRANGEMENTS = {"remote", "hybrid", "onsite"}
 _HOURS_PER_WORKDAY = 8

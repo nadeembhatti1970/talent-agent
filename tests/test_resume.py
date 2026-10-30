@@ -118,7 +118,7 @@ class ResumeTests(unittest.TestCase):
             raw_jobs = json.loads((output_dir / "raw_jobs.json").read_text(encoding="utf-8"))
             self.assertEqual(len(raw_jobs), 1)
 
-    def test_search_enforces_global_max_results_even_if_actor_exceeds_requested_limit(self) -> None:
+    def test_search_caps_each_location_search_even_if_actor_exceeds_requested_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             root = Path(temporary_dir)
             cv_path = root / "cv.txt"
@@ -155,10 +155,10 @@ class ResumeTests(unittest.TestCase):
                 )
 
             raw_jobs = json.loads((output_dir / "raw_jobs.json").read_text(encoding="utf-8"))
-            self.assertEqual(len(raw_jobs), 4)
+            self.assertEqual(len(raw_jobs), 8)
             self.assertEqual([call.args[3] for call in fetch.call_args_list], [4, 4])
 
-    def test_search_requests_global_limit_for_each_location_and_caps_interleaved_total(self) -> None:
+    def test_search_requests_limit_for_each_location_and_keeps_every_search_result(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             root = Path(temporary_dir)
             cv_path = root / "cv.txt"
@@ -195,10 +195,10 @@ class ResumeTests(unittest.TestCase):
                 )
 
             raw_jobs = json.loads((output_dir / "raw_jobs.json").read_text(encoding="utf-8"))
-            self.assertEqual(len(raw_jobs), 50)
+            self.assertEqual(len(raw_jobs), 100)
             self.assertEqual([call.args[3] for call in fetch.call_args_list], [50, 50])
-            self.assertEqual(sum(job["job_id"].startswith("london-") for job in raw_jobs), 25)
-            self.assertEqual(sum(job["job_id"].startswith("manchester-") for job in raw_jobs), 25)
+            self.assertEqual(sum(job["job_id"].startswith("london-") for job in raw_jobs), 50)
+            self.assertEqual(sum(job["job_id"].startswith("manchester-") for job in raw_jobs), 50)
 
     def test_null_max_results_does_not_cap_each_location_or_combined_results(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:

@@ -6,10 +6,21 @@ import unittest
 from unittest.mock import Mock, patch
 
 from talent_agent.llm import ModelResponseError
-from talent_agent.researcher import ResearcherAgent, fetch_apify_jobs, normalize_jobs
+from talent_agent.researcher import ResearcherAgent, fetch_apify_jobs, filter_by_location, normalize_jobs
 
 
 class ResearcherTests(unittest.TestCase):
+    def test_filter_by_location_keeps_allowed_places_and_country_wide_listings(self) -> None:
+        locations = [
+            "London Area, United Kingdom", "Cincinnati, OH", "Remote", "Not specified",
+            "England, United Kingdom", "Slough, England, United Kingdom",
+            "West Midlands, England, United Kingdom", "Dublin, Ireland",
+        ]
+        jobs = [{"location": location} for location in locations]
+        kept = [job["location"] for job in filter_by_location(jobs, ["london", "west midlands"])]
+        self.assertEqual(kept, [locations[0], "Remote", "Not specified", locations[4], locations[6]])
+        self.assertEqual(filter_by_location(jobs, []), jobs)
+
     def test_normalize_jobs_deduplicates_source_ids_across_tracking_urls(self) -> None:
         records = [
             {

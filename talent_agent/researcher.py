@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -50,6 +51,24 @@ def normalize_jobs(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "scraped_at": str(item.get("scraped_at") or datetime.now(timezone.utc).isoformat()),
         })
     return jobs
+
+
+_COUNTRY_WORDS = re.compile(r"\b(?:united kingdom|uk|great britain|england|scotland|wales|northern ireland|area|region)\b")
+
+
+def filter_by_location(jobs: list[dict[str, Any]], allowed_terms: list[str] | None) -> list[dict[str, Any]]:
+    """Keep jobs located in an allowed place, or whose location is only a country/region or 'remote'."""
+    terms = [term.strip().lower() for term in allowed_terms or [] if term.strip()]
+    if not terms:
+        return jobs
+    patterns = [re.compile(rf"(?<![a-z]){re.escape(term)}(?![a-z])") for term in terms]
+    kept = []
+    for job in jobs:
+        location = str(job.get("location", "")).strip().lower()
+        remainder = re.sub(r"[\s,;-]+", " ", _COUNTRY_WORDS.sub("", location)).strip()
+        if remainder in {"", "not specified", "remote"} or any(p.search(location) for p in patterns):
+            kept.append(job)
+    return kept
 
 
 def _employment_type(raw_type: str, title: str, description: str) -> str:

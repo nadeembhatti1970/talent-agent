@@ -113,6 +113,12 @@ class FilterJobsTests(unittest.TestCase):
             ["no-clearance-requirement", "clearance-only-mention"],
         )
 
+    def test_excludes_sc_cleared_titles_but_not_preferred_clearance(self) -> None:
+        from talent_agent.filters import _requires_security_clearance as needs
+        self.assertTrue(needs({"title": "SC Cleared Python Developer", "description": ""}))
+        self.assertTrue(needs({"title": "DevOps", "description": "Must be DV-cleared."}))
+        self.assertFalse(needs({"title": "DevOps", "description": "SC cleared is desirable."}))
+
     def test_clearance_filter_can_be_disabled(self) -> None:
         config = {**self.config, "exclude_security_clearance": False}
         job = {
