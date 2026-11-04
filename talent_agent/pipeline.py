@@ -15,13 +15,13 @@ from .documents import (
     read_cv,
 )
 from .filters import filter_jobs
+from .job_sources import fetch_jobs
 from .llm import ModelResponseError, is_safety_metadata_only, usage_tracker
 from .memory import read_json_object, write_json
 from .reporter import SummaryReportWriterAgent
 from .researcher import (
     RESEARCHER_OUTPUT_VERSION,
     ResearcherAgent,
-    fetch_apify_jobs,
     filter_by_location,
     normalize_jobs,
 )
@@ -154,10 +154,10 @@ def run_pipeline(
                     else "without a configured result limit"
                 )
                 say(
-                    f"\n🔎 Researcher is searching Apify for '{query}' "
+                    f"\n🔎 Researcher is searching jobs for '{query}' "
                     f"in {search_location or 'any location'} ({limit_text})…"
                 )
-                location_jobs = fetch_apify_jobs(
+                location_jobs = fetch_jobs(
                     query, search_location, date_posted, max_results
                 )
                 location_results.append(

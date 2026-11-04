@@ -15,6 +15,9 @@ dependencies = [
   "requests>=2.32.0",
 ]
 
+[project.optional-dependencies]
+jobspy = ["python-jobspy>=1.1.80"]
+
 [project.scripts]
 talent-agent = "talent_agent.cli:main"
 

@@ -96,7 +96,7 @@ class ResumeTests(unittest.TestCase):
             analyst = Mock()
             analyst.evaluate.return_value = []
             with (
-                patch("talent_agent.pipeline.fetch_apify_jobs", fetch),
+                patch("talent_agent.pipeline.fetch_jobs", fetch),
                 patch("talent_agent.pipeline.ResearcherAgent", return_value=researcher),
                 patch("talent_agent.pipeline.CareerAnalystAgent", return_value=analyst),
                 patch("talent_agent.pipeline.SummaryReportWriterAgent"),
@@ -143,7 +143,7 @@ class ResumeTests(unittest.TestCase):
             analyst = Mock()
             analyst.evaluate.return_value = []
             with (
-                patch("talent_agent.pipeline.fetch_apify_jobs", fetch),
+                patch("talent_agent.pipeline.fetch_jobs", fetch),
                 patch("talent_agent.pipeline.ResearcherAgent", return_value=researcher),
                 patch("talent_agent.pipeline.CareerAnalystAgent", return_value=analyst),
                 patch("talent_agent.pipeline.SummaryReportWriterAgent"),
@@ -183,7 +183,7 @@ class ResumeTests(unittest.TestCase):
             analyst = Mock()
             analyst.evaluate.return_value = []
             with (
-                patch("talent_agent.pipeline.fetch_apify_jobs", fetch),
+                patch("talent_agent.pipeline.fetch_jobs", fetch),
                 patch("talent_agent.pipeline.ResearcherAgent", return_value=researcher),
                 patch("talent_agent.pipeline.CareerAnalystAgent", return_value=analyst),
                 patch("talent_agent.pipeline.SummaryReportWriterAgent"),
@@ -216,7 +216,7 @@ class ResumeTests(unittest.TestCase):
             analyst = Mock()
             analyst.evaluate.return_value = []
             with (
-                patch("talent_agent.pipeline.fetch_apify_jobs", fetch),
+                patch("talent_agent.pipeline.fetch_jobs", fetch),
                 patch("talent_agent.pipeline.ResearcherAgent", return_value=researcher),
                 patch("talent_agent.pipeline.CareerAnalystAgent", return_value=analyst),
                 patch("talent_agent.pipeline.SummaryReportWriterAgent"),
@@ -260,7 +260,7 @@ class ResumeTests(unittest.TestCase):
             analyst = Mock()
             analyst.evaluate.return_value = []
             with (
-                patch("talent_agent.pipeline.fetch_apify_jobs", fetch),
+                patch("talent_agent.pipeline.fetch_jobs", fetch),
                 patch("talent_agent.pipeline.ResearcherAgent", return_value=researcher),
                 patch("talent_agent.pipeline.CareerAnalystAgent", return_value=analyst),
                 patch("talent_agent.pipeline.SummaryReportWriterAgent"),

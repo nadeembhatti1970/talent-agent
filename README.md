@@ -6,10 +6,21 @@ Each role uses OpenRouter's OpenAI-compatible Chat Completions API. The default 
 
 ## Setup
 
+Requires Python 3.10+. Core dependencies (`openai`, `python-docx`, `pandas`, `python-dotenv`, `requests`) are installed automatically. The default job source, JobSpy, needs the optional `jobspy` extra (`python-jobspy`).
+
+One-step setup (creates `.venv`, installs everything including JobSpy, and copies `.env.example` to `.env` if missing; uses `uv` when available, otherwise `venv` + `pip`; safe to re-run):
+
+```bash
+./scripts/setup.sh
+source .venv/bin/activate
+```
+
+Manual equivalent:
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install -e '.[jobspy]'
 cp .env.example .env
 ```
 
@@ -17,9 +28,11 @@ On Debian/Ubuntu, install into a virtual environment instead of the system Pytho
 
 ```bash
 uv venv .venv
-uv pip install --python .venv/bin/python -e .
+uv pip install --python .venv/bin/python -e '.[jobspy]'
 cp .env.example .env
 ```
+
+If you only use `reed`, `adzuna`, `apify` or local `--jobs` files, `-e .` without the extra is enough.
 
 Then run the installed command from the project directory. To use `talent-agent` directly without typing `.venv/bin/`, activate the environment once in each terminal:
 
@@ -34,7 +47,7 @@ Set `OPENROUTER_API_KEY` in `.env`. A free OpenRouter account and key are requir
 
 ## Run from Jupyter
 
-Open [`notebooks/run_talent_agent.ipynb`](notebooks/run_talent_agent.ipynb) with a Jupyter kernel using the project's virtual environment, then run its cells from top to bottom. The notebook runs the equivalent of `talent-agent run --search`, using `config/search.json`, the default candidate CV, and credentials from `.env`; set `APIFY_API_TOKEN` and `APIFY_ACTOR_ID` in `.env` before running.
+Open [`notebooks/run_talent_agent.ipynb`](notebooks/run_talent_agent.ipynb) with a Jupyter kernel using the project's virtual environment, then run its cells from top to bottom. The notebook runs the equivalent of `talent-agent run --search`, using `config/search.json`, the default candidate CV, and credentials from `.env`; set `JOB_SOURCE` and its credentials (see "Job search sources") in `.env` before running.
 
 ## Run with local job data
 
@@ -59,9 +72,22 @@ talent-agent run --jobs examples/jobs.json --output-dir ./job-results \
 
 Use `--tracker-format html --tracker-format csv` to generate both tracker formats. Artifact filenames can be changed in the config file or with `--raw-jobs-filename`, `--prioritized-jobs-filename`, `--tracker-html-filename`, and `--tracker-csv-filename`.
 
+## Job search sources
+
+`talent-agent run --search` fetches listings from the source named by `JOB_SOURCE` in `.env`:
+
+| `JOB_SOURCE` | Cost | Setup |
+|---|---|---|
+| `jobspy` (default) | Free | `pip install -e '.[jobspy]'`; optional `JOBSPY_SITES` (`linkedin`, `indeed`, `glassdoor`) and `JOBSPY_COUNTRY` |
+| `reed` | Free API key | `REED_API_KEY` (UK jobs) |
+| `adzuna` | Free API key | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, optional `ADZUNA_COUNTRY` (default `gb`) |
+| `apify` | Paid actor | see below |
+
+`jobspy` scrapes LinkedIn's public guest pages, which LinkedIn's terms prohibit and which it rate-limits; use it for low-volume personal searches. `reed` and `adzuna` are official APIs and the safest choice. When `max_results` is `null`, these sources fall back to 50 results per search.
+
 ## Search with Apify
 
-The Researcher can call an Apify actor if `APIFY_API_TOKEN` is configured:
+With `JOB_SOURCE=apify`, the Researcher can call an Apify actor if `APIFY_API_TOKEN` is configured:
 
 ```bash
 talent-agent run --search

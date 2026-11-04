@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", help="Discover/evaluate jobs and generate application documents")
     source = run.add_mutually_exclusive_group(required=True)
     source.add_argument("--jobs", type=Path, help="Local JSON array of raw job listings")
-    source.add_argument("--search", action="store_true", help="Search using the configured Apify actor")
+    source.add_argument("--search", action="store_true", help="Search using the configured JOB_SOURCE")
     source.add_argument("--resume", type=Path, metavar="RUN_DIR", help="Resume an interrupted run from its output directory")
     run.add_argument("--cv", type=Path, default=DEFAULT_CV_PATH, help=f"Master CV (.txt, .md, or .docx; default: {DEFAULT_CV_PATH})")
     run.add_argument("--candidate", type=Path, help="Optional candidate preferences JSON")
