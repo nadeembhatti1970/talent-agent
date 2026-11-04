@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any
 
+import pandas
 import requests
 
 from .researcher import fetch_apify_jobs
@@ -61,24 +63,39 @@ def fetch_jobspy_jobs(
         ) from exc
     sites = [
         site.strip().lower()
-        for site in os.getenv("JOBSPY_SITES", "linkedin").split(",")
+        for site in os.getenv("JOBSPY_SITES", "linkedin,indeed").split(",")
         if site.strip()
     ]
-    kwargs: dict[str, Any] = {
-        "site_name": sites,
-        "search_term": keywords,
-        "location": location or None,
-        "results_wanted": max_results or DEFAULT_LIMIT,
-        "linkedin_fetch_description": True,
-        "verbose": 0,
-    }
+    country = os.getenv("JOBSPY_COUNTRY", "uk").strip() or "uk"
+    # The pipeline appends the employment type to the query. LinkedIn ignores JobSpy's job_type
+    # filter, so it keeps the word as free text; other sites get a stripped query plus the filter.
+    base_terms, _, trailing = keywords.rpartition(" ")
+    job_type = {"contract": "contract", "permanent": "fulltime"}.get(trailing.lower())
     hours = _hours_old(date_posted)
-    if hours is not None:
-        kwargs["hours_old"] = hours
-    country = os.getenv("JOBSPY_COUNTRY", "").strip()
-    if country:
-        kwargs["country_indeed"] = country
-    frame = scrape_jobs(**kwargs)
+    frames = []
+    for site in sites:
+        kwargs: dict[str, Any] = {
+            "site_name": [site],
+            "search_term": keywords,
+            "location": location or None,
+            "results_wanted": max_results or DEFAULT_LIMIT,
+            "linkedin_fetch_description": True,
+            "country_indeed": country,
+            "verbose": 0,
+        }
+        if site != "linkedin" and job_type:
+            kwargs["search_term"] = base_terms
+            kwargs["job_type"] = job_type
+        if hours is not None:
+            kwargs["hours_old"] = hours
+        try:
+            frames.append(scrape_jobs(**kwargs))
+        except Exception as exc:
+            # One blocked or failing site must not discard results from the others.
+            print(f"   ⚠️ JobSpy {site} search failed: {exc}", file=sys.stderr, flush=True)
+    if not frames:
+        raise RuntimeError("All JobSpy sites failed; see the warnings above.")
+    frame = pandas.concat(frames, ignore_index=True)
     records: list[dict[str, Any]] = []
     for row in frame.to_dict("records"):
         row = {key: (None if value != value else value) for key, value in row.items()}
@@ -86,7 +103,11 @@ def fetch_jobspy_jobs(
         if row.get("min_amount") or row.get("max_amount"):
             low, high = row.get("min_amount"), row.get("max_amount")
             amounts = f"{low:g}-{high:g}" if low and high else f"{low or high:g}"
-            salary = f"{row.get('currency') or ''}{amounts} per {row.get('interval') or 'year'}"
+            interval = row.get("interval") or "year"
+            # LinkedIn often labels day rates as yearly; no real annual salary is this small.
+            if interval == "yearly" and (high or low) < 2000:
+                interval = "daily"
+            salary = f"{row.get('currency') or ''}{amounts} per {interval}"
         job_type = row.get("job_type")
         records.append({
             "id": f"{row.get('site') or 'jobspy'}-{row.get('id')}" if row.get("id") else None,

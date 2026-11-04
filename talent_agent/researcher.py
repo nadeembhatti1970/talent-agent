@@ -76,7 +76,7 @@ def _employment_type(raw_type: str, title: str, description: str) -> str:
     title_text = title.lower().replace("_", "-")
     desc = description.lower().replace("_", "-")
     contract_terms = ("contract", "contractor", "day rate", "daily rate", "per day", "/day", "inside ir35", "outside ir35", "fixed-term")
-    permanent_terms = ("permanent", "full-time", "full time", "employee")
+    permanent_terms = ("permanent", "full-time", "full time", "fulltime", "employee")
     if any(word in raw for word in contract_terms):
         return "contract"
     if any(word in raw for word in permanent_terms):
