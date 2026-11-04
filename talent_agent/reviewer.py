@@ -149,6 +149,25 @@ def fetch_linkedin_profile(url: str) -> dict[str, str]:
     }
 
 
+def _string_list(value: Any, key: str) -> list[str]:
+    """Coerce common model deviations (null, bare string, objects) into a string list."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if not isinstance(value, list):
+        raise ValueError(f"Document Reviewer response must contain a string array for '{key}'")
+    items: list[str] = []
+    for item in value:
+        if isinstance(item, dict):
+            item = next((v for v in item.values() if isinstance(v, str) and v.strip()), "")
+        if not isinstance(item, str):
+            raise ValueError(f"Document Reviewer response must contain a string array for '{key}'")
+        if item.strip():
+            items.append(item.strip())
+    return items
+
+
 class DocumentReviewerAgent:
     def __init__(self, model: str | None = None) -> None:
         self.agent = OpenRouterAgent("Document Reviewer", model)
@@ -197,12 +216,8 @@ The findings arrays block approval and may contain only material factual errors.
         if not isinstance(result, dict):
             raise ValueError("Document Reviewer response must be a JSON object")
         for key in ("cv_findings", "cover_letter_findings"):
-            findings = result.get(key)
-            if not isinstance(findings, list) or not all(isinstance(item, str) for item in findings):
-                raise ValueError(f"Document Reviewer response must contain a string array for '{key}'")
-        notes = result.get("non_blocking_notes", [])
-        if not isinstance(notes, list) or not all(isinstance(item, str) for item in notes):
-            raise ValueError("Document Reviewer response must contain a string array for 'non_blocking_notes'")
+            result[key] = _string_list(result.get(key), key)
+        notes = _string_list(result.get("non_blocking_notes"), "non_blocking_notes")
         result["non_blocking_notes"] = notes
         if not isinstance(result.get("summary"), str):
             raise ValueError("Document Reviewer response must contain a string 'summary'")
