@@ -82,8 +82,30 @@ Jobs: {json.dumps(compact_jobs, ensure_ascii=False)}"""
 
             results = json.loads(raw)
             if isinstance(results, dict):
-                results = results.get("assessments")
+                wrapped = results.get("assessments")
+                if wrapped is None:
+                    # Models sometimes use another key, return one bare assessment, or key assessments by job ID.
+                    wrapped = next(
+                        (value for value in results.values()
+                         if isinstance(value, list) and value and all(isinstance(item, dict) for item in value)),
+                        None,
+                    )
+                if wrapped is None and "job_id" in results:
+                    wrapped = [results]
+                if wrapped is None and results and all(isinstance(value, dict) for value in results.values()):
+                    wrapped = [{"job_id": key, **value} for key, value in results.items()]
+                results = wrapped
             if not isinstance(results, list):
+                if len(batch) > 1:
+                    midpoint = len(batch) // 2
+                    print(
+                        f"      ↻ Career Analyst response had no assessments array in batch "
+                        f"{batch_label}; retrying as smaller requests.",
+                        flush=True,
+                    )
+                    score_batch(batch[:midpoint], f"{batch_label}a")
+                    score_batch(batch[midpoint:], f"{batch_label}b")
+                    return
                 raise ValueError(
                     f"Career Analyst {batch_label} response must contain an assessments array"
                 )
