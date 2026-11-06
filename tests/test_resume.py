@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +16,47 @@ from talent_agent.search_config import load_search_config
 
 
 class ResumeTests(unittest.TestCase):
+    def test_multiple_sources_are_combined_before_per_query_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            cv_path = root / "cv.txt"
+            cv_path.write_text("Candidate CV", encoding="utf-8")
+            jobspy_jobs = [
+                {"id": f"jobspy-{i}", "title": "Engineer", "company": "Example"}
+                for i in range(3)
+            ]
+            reed_jobs = [
+                {"id": f"reed-{i}", "title": "Engineer", "company": "Example"}
+                for i in range(3)
+            ]
+            researcher = Mock()
+            researcher.normalize.side_effect = lambda jobs, *_: jobs
+            analyst = Mock()
+            analyst.evaluate.return_value = []
+            with (
+                patch.dict(os.environ, {"JOB_SOURCE": "jobspy,reed"}),
+                patch("talent_agent.job_sources.fetch_jobspy_jobs", return_value=jobspy_jobs) as jobspy,
+                patch("talent_agent.job_sources.fetch_reed_jobs", return_value=reed_jobs) as reed,
+                patch("talent_agent.pipeline.ResearcherAgent", return_value=researcher),
+                patch("talent_agent.pipeline.CareerAnalystAgent", return_value=analyst),
+                patch("talent_agent.pipeline.SummaryReportWriterAgent"),
+            ):
+                output_dir = run_pipeline(
+                    jobs_path=None, search=True, cv_path=cv_path,
+                    locations=["London"], keywords=["Engineer"], employment_types=["permanent"],
+                    date_posted="past_24_hours", max_results=4, output_root=root / "outputs",
+                    dated_subfolders=False, tracker_formats=["csv"],
+                    review_linkedin_profile=False,
+                )
+
+            jobspy.assert_called_once_with("Engineer permanent", "London", "past_24_hours", 4)
+            reed.assert_called_once_with("Engineer permanent", "London", "past_24_hours", 4)
+            raw_jobs = json.loads((output_dir / "raw_jobs.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                [job["job_id"] for job in raw_jobs],
+                ["jobspy-0", "reed-0", "jobspy-1", "reed-1"],
+            )
+
     def test_search_config_accepts_a_location_list_and_legacy_location(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             config_path = Path(temporary_dir) / "search.json"

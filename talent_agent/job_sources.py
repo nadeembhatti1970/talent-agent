@@ -39,17 +39,31 @@ def _required_env(name: str, source: str) -> str:
 def fetch_jobs(
     keywords: str, location: str, date_posted: str, max_results: int | None
 ) -> list[dict[str, Any]]:
-    """Fetch raw job records from the source selected by the JOB_SOURCE env var."""
-    source = os.getenv("JOB_SOURCE", DEFAULT_SOURCE).strip().lower() or DEFAULT_SOURCE
+    """Fetch and interleave raw job records from the configured sources."""
+    setting = os.getenv("JOB_SOURCE", DEFAULT_SOURCE).strip().lower() or DEFAULT_SOURCE
+    sources = [source.strip() for source in setting.split(",")]
     fetchers = {
         "jobspy": fetch_jobspy_jobs,
         "reed": fetch_reed_jobs,
         "adzuna": fetch_adzuna_jobs,
         "apify": fetch_apify_jobs,
     }
-    if source not in fetchers:
-        raise ValueError(f"JOB_SOURCE must be one of {', '.join(SOURCES)}; got {source!r}")
-    return fetchers[source](keywords, location, date_posted, max_results)
+    if any(source not in fetchers for source in sources):
+        raise ValueError(
+            f"JOB_SOURCE must be a comma-separated list of {', '.join(SOURCES)}; got {setting!r}"
+        )
+    if len(set(sources)) != len(sources):
+        raise ValueError("JOB_SOURCE must not contain duplicate sources")
+    results = [
+        fetchers[source](keywords, location, date_posted, max_results)
+        for source in sources
+    ]
+    return [
+        jobs[index]
+        for index in range(max((len(jobs) for jobs in results), default=0))
+        for jobs in results
+        if index < len(jobs)
+    ]
 
 
 def fetch_jobspy_jobs(

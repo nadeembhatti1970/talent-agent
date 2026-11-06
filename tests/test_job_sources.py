@@ -26,6 +26,40 @@ class JobSourceTests(unittest.TestCase):
             self.assertEqual(fetch_jobs("x", "London", "past_week", 5), [{"id": 1}])
         reed.assert_called_once_with("x", "London", "past_week", 5)
 
+    def test_multiple_sources_are_interleaved_and_receive_same_search(self) -> None:
+        with (
+            patch.dict(os.environ, {"JOB_SOURCE": " JobSpy, reed "}),
+            patch("talent_agent.job_sources.fetch_jobspy_jobs", return_value=[{"id": "j1"}, {"id": "j2"}]) as jobspy,
+            patch("talent_agent.job_sources.fetch_reed_jobs", return_value=[{"id": "r1"}]) as reed,
+        ):
+            result = fetch_jobs("x", "London", "past_24_hours", 5)
+
+        self.assertEqual(result, [{"id": "j1"}, {"id": "r1"}, {"id": "j2"}])
+        jobspy.assert_called_once_with("x", "London", "past_24_hours", 5)
+        reed.assert_called_once_with("x", "London", "past_24_hours", 5)
+
+    def test_invalid_or_duplicate_sources_are_rejected_before_fetching(self) -> None:
+        for value in ("jobspy,nope", "jobspy,,reed", "jobspy,JOBSPY"):
+            with (
+                self.subTest(value=value),
+                patch.dict(os.environ, {"JOB_SOURCE": value}),
+                patch("talent_agent.job_sources.fetch_jobspy_jobs") as jobspy,
+                patch("talent_agent.job_sources.fetch_reed_jobs") as reed,
+            ):
+                with self.assertRaises(ValueError):
+                    fetch_jobs("x", "London", "past_week", 5)
+                jobspy.assert_not_called()
+                reed.assert_not_called()
+
+    def test_source_error_is_not_silently_ignored(self) -> None:
+        with (
+            patch.dict(os.environ, {"JOB_SOURCE": "jobspy,reed"}),
+            patch("talent_agent.job_sources.fetch_jobspy_jobs", return_value=[{"id": 1}]),
+            patch("talent_agent.job_sources.fetch_reed_jobs", side_effect=RuntimeError("Reed unavailable")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Reed unavailable"):
+                fetch_jobs("x", "London", "past_week", 5)
+
     def test_reed_results_normalize(self) -> None:
         payload = {"results": [{
             "jobId": 7, "jobTitle": "Platform Engineer", "employerName": "Acme",
