@@ -72,11 +72,36 @@ def load_search_config(path: Path = DEFAULT_SEARCH_CONFIG) -> dict[str, Any]:
     config.setdefault("minimum_day_rate", None)
     config.setdefault("minimum_annual_salary", None)
     config.setdefault("exclude_unknown_compensation", False)
+    config.setdefault("min_tech_overlap", 60)
+    config.setdefault("role_family_gate", True)
+    config.setdefault("reapply_after_days", 30)
+    config.setdefault("max_applications", None)
     config.setdefault("review_documents", True)
     config.setdefault("review_linkedin_profile", True)
-    for key in ("review_documents", "review_linkedin_profile"):
+    for key in ("review_documents", "review_linkedin_profile", "role_family_gate"):
         if not isinstance(config[key], bool):
             raise ValueError(f"{key} must be true or false")
+    if (
+        isinstance(config["min_tech_overlap"], bool)
+        or not isinstance(config["min_tech_overlap"], (int, float))
+        or not 0 <= float(config["min_tech_overlap"]) <= 100
+    ):
+        raise ValueError("min_tech_overlap must be a number between 0 and 100")
+    if (
+        config["reapply_after_days"] is not None
+        and (
+            isinstance(config["reapply_after_days"], bool)
+            or not isinstance(config["reapply_after_days"], (int, float))
+            or float(config["reapply_after_days"]) < 0
+        )
+    ):
+        raise ValueError("reapply_after_days must be a non-negative number or null")
+    if config["max_applications"] is not None and (
+        isinstance(config["max_applications"], bool)
+        or not isinstance(config["max_applications"], int)
+        or config["max_applications"] < 0
+    ):
+        raise ValueError("max_applications must be a non-negative integer or null")
     config.setdefault("allowed_location_terms", [])
     if not isinstance(config["allowed_location_terms"], list) or not all(
         isinstance(term, str) for term in config["allowed_location_terms"]

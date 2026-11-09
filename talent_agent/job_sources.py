@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections import Counter
 from typing import Any
 
 import pandas
@@ -36,6 +37,15 @@ def _required_env(name: str, source: str) -> str:
     return value
 
 
+def _split_employment_type(keywords: str) -> tuple[str, str | None]:
+    """Separate the pipeline's trailing employment type from the search text."""
+    base, _, trailing = keywords.rpartition(" ")
+    kind = trailing.strip().lower()
+    if kind in {"contract", "permanent"}:
+        return base.strip(), kind
+    return keywords.strip(), None
+
+
 def fetch_jobs(
     keywords: str, location: str, date_posted: str, max_results: int | None
 ) -> list[dict[str, Any]]:
@@ -58,12 +68,20 @@ def fetch_jobs(
         fetchers[source](keywords, location, date_posted, max_results)
         for source in sources
     ]
-    return [
+    interleaved = [
         jobs[index]
         for index in range(max((len(jobs) for jobs in results), default=0))
         for jobs in results
         if index < len(jobs)
     ]
+    counts = Counter(str(job.get("source") or "unknown") for job in interleaved)
+    if interleaved:
+        print(
+            "   📡 Source results: "
+            + ", ".join(f"{name}={count}" for name, count in counts.items()),
+            flush=True,
+        )
+    return interleaved
 
 
 def fetch_jobspy_jobs(
@@ -117,14 +135,15 @@ def fetch_jobspy_jobs(
         if row.get("min_amount") or row.get("max_amount"):
             low, high = row.get("min_amount"), row.get("max_amount")
             amounts = f"{low:g}-{high:g}" if low and high else f"{low or high:g}"
-            interval = row.get("interval") or "year"
+            interval = str(row.get("interval") or "year").lower()
             # LinkedIn often labels day rates as yearly; no real annual salary is this small.
-            if interval == "yearly" and (high or low) < 2000:
-                interval = "daily"
+            if interval in {"yearly", "year", "annual", "annually"} and (high or low or 0) < 2000:
+                interval = "day"
             salary = f"{row.get('currency') or ''}{amounts} per {interval}"
         job_type = row.get("job_type")
+        site = str(row.get("site") or "jobspy").strip().lower()
         records.append({
-            "id": f"{row.get('site') or 'jobspy'}-{row.get('id')}" if row.get("id") else None,
+            "id": f"{site}-{row.get('id')}" if row.get("id") else None,
             "title": row.get("title"),
             "company": row.get("company"),
             "location": row.get("location"),
@@ -133,6 +152,7 @@ def fetch_jobspy_jobs(
             "employment_type": ", ".join(job_type) if isinstance(job_type, (list, tuple)) else job_type,
             "workplace_arrangement": "remote" if row.get("is_remote") else None,
             "salary": salary,
+            "source": site,
         })
     return records
 
@@ -143,6 +163,7 @@ def fetch_reed_jobs(
     from datetime import datetime, timedelta, timezone
 
     api_key = _required_env("REED_API_KEY", "reed")
+    base_keywords, employment_type = _split_employment_type(keywords)
     hours = _hours_old(date_posted)
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours) if hours else None
     limit = max_results or DEFAULT_LIMIT
@@ -150,14 +171,19 @@ def fetch_reed_jobs(
     skip = 0
     page_size = min(100, limit)
     while len(records) < limit:
+        params: dict[str, Any] = {
+            "keywords": base_keywords or keywords,
+            "locationName": location,
+            "resultsToTake": page_size,
+            "resultsToSkip": skip,
+        }
+        if employment_type == "contract":
+            params["contract"] = "true"
+        elif employment_type == "permanent":
+            params["permanent"] = "true"
         response = requests.get(
             "https://www.reed.co.uk/api/1.0/search",
-            params={
-                "keywords": keywords,
-                "locationName": location,
-                "resultsToTake": page_size,
-                "resultsToSkip": skip,
-            },
+            params=params,
             auth=(api_key, ""),
             timeout=(10, 30),
         )
@@ -179,7 +205,9 @@ def fetch_reed_jobs(
             salary = None
             if low or high:
                 amounts = f"{low:g}-{high:g}" if low and high else f"{low or high:g}"
-                salary = f"{item.get('currency') or 'GBP'} {amounts}"
+                ceiling = max(value for value in (low, high) if isinstance(value, (int, float)))
+                period = "day" if ceiling < 2_000 else "year"
+                salary = f"{item.get('currency') or 'GBP'} {amounts} per {period}"
             records.append({
                 "id": f"reed-{item.get('jobId')}",
                 "title": item.get("jobTitle"),
@@ -188,6 +216,8 @@ def fetch_reed_jobs(
                 "url": item.get("jobUrl"),
                 "description": item.get("jobDescription"),
                 "salary": salary,
+                "employment_type": employment_type,
+                "source": "reed",
             })
         if len(results) < page_size:
             break
@@ -209,6 +239,7 @@ def fetch_adzuna_jobs(
     app_id = _required_env("ADZUNA_APP_ID", "adzuna")
     app_key = _required_env("ADZUNA_APP_KEY", "adzuna")
     country = os.getenv("ADZUNA_COUNTRY", "gb").strip().lower() or "gb"
+    base_keywords, employment_type = _split_employment_type(keywords)
     hours = _hours_old(date_posted)
     limit = max_results or DEFAULT_LIMIT
     per_page = min(50, limit)
@@ -218,7 +249,7 @@ def fetch_adzuna_jobs(
         params: dict[str, Any] = {
             "app_id": app_id,
             "app_key": app_key,
-            "what": keywords,
+            "what": base_keywords or keywords,
             "results_per_page": per_page,
             "content-type": "application/json",
         }
@@ -226,6 +257,10 @@ def fetch_adzuna_jobs(
             params["where"] = location
         if hours is not None:
             params["max_days_old"] = max(1, hours // 24)
+        if employment_type == "contract":
+            params["contract"] = 1
+        elif employment_type == "permanent":
+            params["permanent"] = 1
         response = requests.get(
             f"https://api.adzuna.com/v1/api/jobs/{country}/search/{page}",
             params=params,
@@ -247,6 +282,9 @@ def fetch_adzuna_jobs(
             if low or high:
                 amounts = f"{low:g}-{high:g}" if low and high else f"{low or high:g}"
                 salary = f"{amounts} per year"
+            api_type = " ".join(
+                str(item.get(key)) for key in ("contract_type", "contract_time") if item.get(key)
+            ).strip()
             records.append({
                 "id": f"adzuna-{item.get('id')}",
                 "title": item.get("title"),
@@ -254,10 +292,9 @@ def fetch_adzuna_jobs(
                 "location": (item.get("location") or {}).get("display_name"),
                 "url": item.get("redirect_url"),
                 "description": item.get("description"),
-                "employment_type": " ".join(
-                    str(item.get(key)) for key in ("contract_type", "contract_time") if item.get(key)
-                ),
+                "employment_type": api_type or employment_type,
                 "salary": salary,
+                "source": "adzuna",
             })
         if len(results) < per_page:
             break

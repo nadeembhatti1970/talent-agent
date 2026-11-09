@@ -81,6 +81,8 @@ All pipeline executions follow a strict chronological directory schema to ensure
 * Persist completed Career Analyst batches and generated document text immediately so an interrupted run can resume without repeating completed model calls.
 * Persist LinkedIn fetch status and Reviewer progress/results locally so resumed runs retain review state.
 * Keep `run_state.json` current with stage status and input identity; resume only when the saved inputs match.
+* Maintain the cross-run application ledger at `outputs/application_ledger.json` so the same company/title is not applied to repeatedly within the cooldown window.
+* Record contract details (day rate, IR35 status, length, start date) from the Career Analyst and surface them in the tracker when the listing provides them.
 * Treat agent output JSON as local candidate data; do not commit it or include credentials.
 
 ---

@@ -11,7 +11,7 @@ from docx.shared import Inches, Pt
 from .llm import ModelResponseError, OpenRouterAgent, is_safety_metadata_only
 from .reviewer import DOCUMENT_REVIEW_VERSION, DocumentReviewerAgent
 
-APPLICATION_PROMPT_VERSION = 4
+APPLICATION_PROMPT_VERSION = 5
 _MODEL_COMMENTARY = re.compile(
     r"(?im)^\s*(?:"
     r"the user wants me to\b|"
@@ -160,11 +160,21 @@ def _prepare_application_text(text: str, document_type: str, github_url: str) ->
 
 def _job_context(job: dict[str, Any]) -> str:
     description = str(job.get("description", "")).strip() or "No job description was provided."
+    contract_details = ""
+    if str(job.get("employment_type", "")).lower() == "contract":
+        contract_details = (
+            f"Contract rate: {job.get('day_rate') or job.get('salary', 'Not specified')}\n"
+            f"IR35 status: {job.get('ir35_status') or 'Not specified'}\n"
+            f"Contract length: {job.get('contract_length') or 'Not specified'}\n"
+            f"Start date: {job.get('start_date') or 'Not specified'}\n"
+        )
     return (
         f"Role: {job.get('title', 'Not specified')}\n"
         f"Company: {job.get('company', 'Not specified')}\n"
         f"Location: {job.get('location', 'Not specified')}\n"
         f"Employment type: {job.get('employment_type', 'Not specified')}\n"
+        f"Salary/rate: {job.get('salary', 'Not specified')}\n"
+        f"{contract_details}"
         f"Job description, requirements, and responsibilities:\n{description}"
     )
 
@@ -244,6 +254,13 @@ MASTER CV:
 <master_cv>
 {cv}
 </master_cv>"""
+        if str(job.get("employment_type", "")).lower() == "contract":
+            prompt += (
+                "\n\nThis is a contract role. If the candidate context or role details state "
+                "a day rate, availability, IR35 status or onsite flexibility, you may mention it "
+                "briefly and factually. Do not invent a rate, availability date, IR35 status or "
+                "right-to-work detail."
+            )
         if reviewer_feedback:
             prompt += (
                 "\n\nReviewer feedback to address without adding unsupported claims:\n- "

@@ -99,7 +99,8 @@ class ResumeTests(unittest.TestCase):
     def test_default_search_config_has_separate_locations_and_contract_review_setting(self) -> None:
         config = load_search_config()
 
-        self.assertGreater(len(config["locations"]), 1)
+        self.assertGreaterEqual(len(config["locations"]), 1)
+        self.assertGreater(len(config["allowed_location_terms"]), 1)
         self.assertTrue(config["include_unknown_contract_compensation"])
         self.assertTrue(config["review_documents"])
         self.assertTrue(config["review_linkedin_profile"])

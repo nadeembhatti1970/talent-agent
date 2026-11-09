@@ -111,16 +111,38 @@ CLI values override the file for that run, for example:
 
 ```bash
 talent-agent run --search --keywords "Platform Engineer" --location "London" \
-  --employment-type contract --min-day-rate 500
+  --employment-type contract --min-day-rate 600
 ```
 
 Repeat `--location` to search more than one place, for example `--location London --location Manchester`. The GitHub profile URL can be set in `config/search.json` as `github_profile_url` or overridden for one run with `--github-url`. The project default is empty; set the URL only if you want it included in generated application documents.
 
+### Contract-focused profile
+
+[`config/search.contract.json`](config/search.contract.json) is a contract-only profile with broader DevOps/Platform keywords, a seven-day window, a £600 day-rate floor, and all workplace arrangements. Use it for a weekly deep sweep:
+
+```bash
+talent-agent run --search --config config/search.contract.json
+```
+
+The run uses `JOB_SOURCE` from `.env` (`jobspy,reed` by default). Set `JOB_SOURCE` in `.env` if you want to add or remove a source.
+
+`locations` is set to a single national search, with `allowed_location_terms` narrowing the results to London, the West Midlands, Manchester, Leeds, Bristol, Edinburgh, and remote listings. This avoids multiplying the query count across every city. The default [`config/search.json`](config/search.json) uses the same national-search strategy for mixed contract/permanent runs.
+
+Sources now use their native contract filters where available: Reed sends `contract=true`, Adzuna sends `contract=1`, and the trailing `contract`/`permanent` word is removed from the keyword. Bare Reed/Adzuna amounts are inferred as day rates below £2,000 or annual salaries above £20,000. Listings with no description are flagged as `description_missing`, and duplicate listings from different sources are merged so the longest description is retained.
+
+### Application fit and cross-run deduplication
+
+`min_tech_overlap` (default 60) and `role_family_gate` (default true) prevent strong compensation or seniority from carrying a poor technical fit into document generation. The gate recognises DevOps, Platform, SRE, Cloud, Infrastructure, Automation, MLOps and Build/Release titles; set `role_family_gate: false` or pass `--no-role-family-gate` to disable it.
+
+`reapply_after_days` (default 30) controls a cross-run ledger at `outputs/application_ledger.json`. Roles applied to within the cooldown are marked `previously_applied` and skip document generation. Pass `--ignore-ledger` to regenerate anyway, or `--reapply-after-days 0` to disable the cooldown for one run. Duplicate postings of the same company and title within a run are marked `duplicate_role` and applied to once.
+
+`max_applications` (default null) caps document generation per run, highest score first; remaining eligible roles are marked `queued_max_applications`. The tracker now includes employment type, source, role family, day rate, IR35 status, contract length, start date, application status, previous-application date, and missing-description flag.
+
 ## Pipeline behavior
 
 1. Researcher normalizes and deduplicates source listings into `raw_jobs.json`.
-2. Employment type, workplace arrangement, and configured compensation filters are applied, then the Career Analyst returns a 0–100 match score and rationale per listing. Only scores at or above 70 are retained in `prioritized_jobs.json`.
-3. CV Editor and Cover Letter Writer create one DOCX each per retained job in `applications/`. Documents contain no template labels, generated-document headings, or date placeholders. A configured GitHub profile URL is included in both documents. Prompts explicitly prohibit inventing candidate credentials.
+2. Employment type, workplace arrangement, and configured compensation filters are applied, then the Career Analyst returns a 0–100 match score, rationale, and contract details (rate, IR35, length, start date) per listing. Only scores at or above 70 are retained in `prioritized_jobs.json`.
+3. The application gate, duplicate check, ledger cooldown, and `max_applications` cap select which qualified roles receive documents. CV Editor and Cover Letter Writer create one DOCX each per selected job in `applications/`. Documents contain no template labels, generated-document headings, or date placeholders. A configured GitHub profile URL is included in both documents. Prompts explicitly prohibit inventing candidate credentials and, for contract roles, inventing a rate, IR35 status or availability.
 4. Document Reviewer checks factual support and role/client alignment against the original CV, available public LinkedIn text, and listing. It can request one revision and records final findings.
 5. Summary Report Writer creates `tracker.html` and `tracker.csv`, with external job links, relative links to generated files, and document-review status.
 

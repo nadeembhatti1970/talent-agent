@@ -42,6 +42,68 @@ _CLEARANCE_REQUIRED_PATTERNS = (
 )
 _WORKPLACE_ARRANGEMENTS = {"remote", "hybrid", "onsite"}
 _HOURS_PER_WORKDAY = 8
+# Reed and Adzuna sometimes return a bare amount without a pay period. A
+# contract day rate is normally below £2,000, while an annual salary is above
+# £20,000. Values in between are ambiguous and are left unclassified.
+_DAY_RATE_CEILING = 2_000
+_ANNUAL_SALARY_FLOOR = 20_000
+
+_ROLE_FAMILIES = (
+    ("sre", re.compile(r"\bsite\s+reliability\b|\bsre\b", re.IGNORECASE)),
+    ("devops", re.compile(r"\bdevops\b|\bdev\s+ops\b", re.IGNORECASE)),
+    ("platform", re.compile(
+        r"\bplatform\s+(?:engineer|engineering|architect|lead|manager|specialist|consultant)\b|"
+        r"\b(?:engineer|engineering|architect|lead|manager|specialist|consultant)\s+platform\b",
+        re.IGNORECASE,
+    )),
+    ("cloud", re.compile(
+        r"\bcloud\s+(?:engineer|engineering|architect|infrastructure|platform|specialist|consultant)\b|"
+        r"\b(?:engineer|architect|specialist|consultant)\s+cloud\b",
+        re.IGNORECASE,
+    )),
+    ("infrastructure", re.compile(
+        r"\binfrastructure\s+(?:engineer|engineering|architect|lead|specialist|consultant)\b|"
+        r"\b(?:engineer|architect|lead|specialist|consultant)\s+infrastructure\b",
+        re.IGNORECASE,
+    )),
+    ("automation", re.compile(
+        r"\bautomation\s+(?:engineer|engineering|architect|specialist|consultant)\b|"
+        r"\b(?:python|aws|cloud|devops|infrastructure)\s+automation\b",
+        re.IGNORECASE,
+    )),
+    ("mlops", re.compile(r"\bmlops\b|\bml\s+platform\b|\bmachine\s+learning\s+platform\b", re.IGNORECASE)),
+    ("release", re.compile(r"\bbuild\s+(?:and|&)\s+release\b|\brelease\s+engineer\b", re.IGNORECASE)),
+)
+
+
+def classify_role_family(job: dict[str, Any]) -> str:
+    """Return the candidate's core role family for a listing, based on its title.
+
+    The title is used deliberately: descriptions often mention cloud or platform
+    work for backend, data, and security roles, which would defeat the gate.
+    """
+    title = str(job.get("title") or "")
+    for family, pattern in _ROLE_FAMILIES:
+        if pattern.search(title):
+            return family
+    return ""
+
+
+def application_gate(
+    job: dict[str, Any], minimum_tech_overlap: float, role_family_gate: bool
+) -> tuple[bool, str]:
+    """Decide whether a scored job should receive tailored application documents."""
+    if not role_family_gate:
+        return True, ""
+    if not classify_role_family(job):
+        return False, "filtered_role_family"
+    try:
+        tech_overlap = float(job["tech_overlap"])
+    except (KeyError, TypeError, ValueError):
+        return True, ""
+    if tech_overlap < float(minimum_tech_overlap):
+        return False, "filtered_tech_overlap"
+    return True, ""
 
 
 def classify_workplace_arrangement(job: dict[str, Any]) -> str:
@@ -163,6 +225,20 @@ def _compensation_period(value: str) -> str | None:
         return "annual"
     if hourly and not daily and not annual:
         return "hourly"
+    if daily or annual or hourly:
+        return None
+
+    # Some sources (notably Reed) omit the pay period. Infer it from the
+    # amount so a bare day rate is not mistaken for an annual salary and a
+    # bare annual salary is not mistaken for a day rate.
+    numbers = [float(value.replace(",", "")) for value in re.findall(r"\d[\d,]*(?:\.\d+)?", text)]
+    if not numbers:
+        return None
+    amount = max(numbers)
+    if amount < _DAY_RATE_CEILING:
+        return "daily"
+    if amount >= _ANNUAL_SALARY_FLOOR:
+        return "annual"
     return None
 
 

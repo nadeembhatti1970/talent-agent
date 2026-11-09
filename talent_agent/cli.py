@@ -37,6 +37,32 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--currency")
     run.add_argument("--min-day-rate", type=float, help="Minimum contract day rate in configured currency")
     run.add_argument("--min-annual-salary", type=float, help="Minimum permanent annual salary in configured currency")
+    run.add_argument(
+        "--min-tech-overlap",
+        type=float,
+        help="Minimum technical-overlap score for automatic application generation (overrides config)",
+    )
+    run.add_argument(
+        "--role-family-gate",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Only generate applications for the candidate's core role families (overrides config)",
+    )
+    run.add_argument(
+        "--reapply-after-days",
+        type=float,
+        help="Skip roles applied to within this many days; 0 disables the cooldown",
+    )
+    run.add_argument(
+        "--max-applications",
+        type=int,
+        help="Maximum applications to generate per run, highest score first",
+    )
+    run.add_argument(
+        "--ignore-ledger",
+        action="store_true",
+        help="Ignore the cross-run application ledger and regenerate documents",
+    )
     run.add_argument("--exclude-unknown-compensation", action="store_true", default=None, help="Reject listings without a parseable matching pay amount")
     run.add_argument(
         "--exclude-security-clearance",
@@ -78,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    # The local .env file is the source of truth for JOB_SOURCE and credentials.
     load_dotenv(override=True)
     parser = build_parser()
     args = parser.parse_args()
@@ -122,6 +149,27 @@ def main() -> int:
             workplace_arrangements=workplace_arrangements,
             minimum_day_rate=args.min_day_rate if args.min_day_rate is not None else config["minimum_day_rate"],
             minimum_annual_salary=args.min_annual_salary if args.min_annual_salary is not None else config["minimum_annual_salary"],
+            min_tech_overlap=(
+                args.min_tech_overlap
+                if args.min_tech_overlap is not None
+                else config["min_tech_overlap"]
+            ),
+            role_family_gate=(
+                args.role_family_gate
+                if args.role_family_gate is not None
+                else config["role_family_gate"]
+            ),
+            reapply_after_days=(
+                args.reapply_after_days
+                if args.reapply_after_days is not None
+                else config["reapply_after_days"]
+            ),
+            max_applications=(
+                args.max_applications
+                if args.max_applications is not None
+                else config["max_applications"]
+            ),
+            ignore_ledger=args.ignore_ledger,
             exclude_unknown_compensation=exclude_unknown,
             include_unknown_contract_compensation=config.get(
                 "include_unknown_contract_compensation", not exclude_unknown

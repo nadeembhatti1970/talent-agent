@@ -14,8 +14,9 @@ from .documents import (
     generate_application_docs,
     read_cv,
 )
-from .filters import filter_jobs
+from .filters import application_gate, classify_role_family, filter_jobs
 from .job_sources import fetch_jobs
+from .ledger import application_key, load_ledger, record_application, should_skip
 from .llm import ModelResponseError, is_safety_metadata_only, usage_tracker
 from .memory import read_json_object, write_json
 from .reporter import SummaryReportWriterAgent
@@ -44,6 +45,9 @@ def run_pipeline(
     minimum_day_rate: float | None = None, minimum_annual_salary: float | None = None,
     exclude_unknown_compensation: bool = False, exclude_security_clearance: bool = False,
     include_unknown_contract_compensation: bool | None = None,
+    min_tech_overlap: float = 60.0, role_family_gate: bool = False,
+    reapply_after_days: float | None = 30, max_applications: int | None = None,
+    ignore_ledger: bool = False,
     allowed_location_terms: list[str] | None = None,
     linkedin_url: str = "", github_url: str = "",
     review_documents: bool = True, review_linkedin_profile: bool = True,
@@ -93,6 +97,9 @@ def run_pipeline(
     candidate["currency"] = currency
     candidate["employment_types"] = employment_types or ["contract", "permanent"]
     candidate["workplace_arrangements"] = workplace_arrangements or ["hybrid", "onsite", "remote"]
+    candidate["min_tech_overlap"] = min_tech_overlap
+    candidate["role_family_gate"] = role_family_gate
+    candidate["reapply_after_days"] = reapply_after_days
     state_path: Path | None = None
     if resume_from is not None:
         output_dir = resume_from.expanduser().resolve()
@@ -489,7 +496,52 @@ def run_pipeline(
     set_stage("career_analyst", "complete")
     say(f"   ✅ {len(prioritized)} role(s) qualified.")
     prioritized_path = output_dir / prioritized_jobs_filename
+    for job in prioritized:
+        job["role_family"] = classify_role_family(job)
+    ledger_path = output_root / "application_ledger.json"
+    ledger = (
+        load_ledger(ledger_path)
+        if resume_from is None
+        else {"version": 1, "applications": {}}
+    )
+    applications: list[dict[str, Any]] = []
+    seen_application_keys: dict[str, str] = {}
+    for job in prioritized:
+        key = application_key(job)
+        if key in seen_application_keys:
+            job["application_status"] = "duplicate_role"
+            job["duplicate_of"] = seen_application_keys[key]
+            continue
+        seen_application_keys[key] = str(job.get("job_id", ""))
+        previous = (
+            should_skip(ledger, job, reapply_after_days)
+            if resume_from is None and not ignore_ledger
+            else None
+        )
+        if previous:
+            job["application_status"] = "previously_applied"
+            job["previously_applied"] = previous.get("last_applied_at", "")
+            job["previous_application"] = previous
+            continue
+        passed, reason = application_gate(job, min_tech_overlap, role_family_gate)
+        if not passed:
+            job["application_status"] = reason
+            continue
+        job["application_status"] = "eligible"
+        applications.append(job)
+    applications.sort(key=lambda item: float(item.get("score", 0)), reverse=True)
+    if max_applications is not None and max_applications >= 0 and len(applications) > max_applications:
+        for job in applications[max_applications:]:
+            job["application_status"] = "queued_max_applications"
+        applications = applications[:max_applications]
     write_json(prioritized_path, prioritized)
+    if applications:
+        say(
+            f"   🎯 {len(applications)} role(s) selected for application after fit, "
+            "ledger, and volume gates."
+        )
+    else:
+        say("   🎯 No roles passed the application fit, ledger, and volume gates.")
 
     cv_editor_data = read_json_object(cv_editor_path)
     cv_outputs = cv_editor_data.get("outputs", {})
@@ -518,8 +570,8 @@ def run_pipeline(
     document_reviewer: DocumentReviewerAgent | None = None
     unapproved_applications = 0
     incomplete_applications = 0
-    for index, job in enumerate(prioritized, start=1):
-        say(f"\n💼 Application {index}/{len(prioritized)} · {job['title']} — {job['company']} (match {job['score']:.1f})")
+    for index, job in enumerate(applications, start=1):
+        say(f"\n💼 Application {index}/{len(applications)} · {job['title']} — {job['company']} (match {job['score']:.1f})")
         job_id = str(job["job_id"])
 
         def save_cv(text: str, *, key: str = job_id) -> None:
@@ -580,6 +632,16 @@ def run_pipeline(
                     on_review_progress=save_review,
                 )
             )
+            if job.get("cv_document") and job.get("cover_letter_document"):
+                job["application_status"] = "applied"
+                record_application(
+                    ledger_path,
+                    job,
+                    {
+                        "cv": job.get("cv_document", ""),
+                        "cover_letter": job.get("cover_letter_document", ""),
+                    },
+                )
         except DocumentReviewRejectedError as exc:
             saved_review = reviewer_outputs.get(job_id)
             if (
@@ -589,12 +651,14 @@ def run_pipeline(
             ):
                 raise
             job["document_review"] = saved_review["final_report"]
+            job["application_status"] = "review_rejected"
             unapproved_applications += 1
             say(
                 f"      ⚠ Reviewer did not approve this application; documents are withheld. "
                 f"Continuing to the next role. {exc}"
             )
         except ModelResponseError as exc:
+            job["application_status"] = "incomplete"
             incomplete_applications += 1
             say(
                 f"      ⚠ {exc} This application remains checkpointed; "

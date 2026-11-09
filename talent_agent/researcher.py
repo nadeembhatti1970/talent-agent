@@ -8,7 +8,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 import requests
 
@@ -16,6 +16,83 @@ from .filters import classify_workplace_arrangement
 from .llm import ModelResponseError, OpenRouterAgent
 
 RESEARCHER_OUTPUT_VERSION = 4
+
+
+def _canonical_url(value: str) -> str:
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    query = [
+        (key, item)
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.lower().startswith(("utm_", "tracking", "trk", "refid", "ref"))
+    ]
+    return urlunparse((
+        parsed.scheme.lower(),
+        parsed.netloc.lower(),
+        parsed.path.rstrip("/"),
+        "",
+        urlencode(query),
+        "",
+    ))
+
+
+def _normalized_text(value: str) -> str:
+    text = re.sub(r"\b(?:ltd|limited|plc|inc|llc)\b\.?", "", value.lower())
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text).split())
+
+
+def _job_fingerprint(job: dict[str, Any]) -> str:
+    return "|".join((
+        _normalized_text(str(job.get("company") or "")),
+        _normalized_text(str(job.get("title") or "")),
+        _normalized_text(str(job.get("location") or "")),
+    ))
+
+
+def _source_from_item(item: dict[str, Any], url: str, source_job_id: str) -> str:
+    explicit = str(item.get("source") or item.get("site") or "").strip().lower()
+    if explicit:
+        return explicit
+    if source_job_id.startswith("reed-"):
+        return "reed"
+    if source_job_id.startswith("adzuna-"):
+        return "adzuna"
+    if source_job_id.startswith("indeed-") or "indeed." in url:
+        return "indeed"
+    if source_job_id.startswith("linkedin-") or "linkedin." in url:
+        return "linkedin"
+    return "unknown"
+
+
+def _can_merge(existing: dict[str, Any], candidate: dict[str, Any], same_source: bool) -> bool:
+    # Without URLs there is not enough evidence to merge two records that only
+    # share a generic title and company; keep them separate.
+    if not existing.get("url") and not candidate.get("url"):
+        return False
+    if not same_source:
+        return True
+    existing_description = str(existing.get("description") or "").strip()
+    candidate_description = str(candidate.get("description") or "").strip()
+    return bool(existing_description) != bool(candidate_description)
+
+
+def _merge_job(base: dict[str, Any], incoming: dict[str, Any]) -> None:
+    """Merge duplicate listings, preferring the record with usable content."""
+    base_description = str(base.get("description") or "").strip()
+    incoming_description = str(incoming.get("description") or "").strip()
+    if len(incoming_description) > len(base_description):
+        base["description"] = incoming_description
+    for field in ("salary", "employment_type", "workplace_arrangement", "location", "url"):
+        current = base.get(field)
+        if current in (None, "", "Not specified", "unknown"):
+            incoming_value = incoming.get(field)
+            if incoming_value not in (None, ""):
+                base[field] = incoming_value
+    sources = set(base.get("sources") or [base.get("source") or "unknown"])
+    sources.update(incoming.get("sources") or [incoming.get("source") or "unknown"])
+    base["sources"] = sorted(source for source in sources if source)
+    base["description_missing"] = not bool(str(base.get("description") or "").strip())
 
 
 def normalize_jobs(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -38,6 +115,7 @@ def normalize_jobs(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if identity in seen:
             continue
         seen.add(identity)
+        source = _source_from_item(item, url, job_id)
         jobs.append({
             "job_id": job_id,
             "title": title,
@@ -45,12 +123,41 @@ def normalize_jobs(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "location": str(item.get("location") or item.get("jobLocation") or "Not specified").strip(),
             "url": url,
             "description": description,
+            "description_missing": not bool(description),
             "salary": item.get("salary") or item.get("salaryRange") or item.get("salaryInfo") or item.get("salaryInsights") or "Not specified",
             "employment_type": employment_type,
             "workplace_arrangement": classify_workplace_arrangement(item),
+            "source": source,
+            "sources": [source] if source else [],
             "scraped_at": str(item.get("scraped_at") or datetime.now(timezone.utc).isoformat()),
         })
-    return jobs
+    # A second pass merges the same vacancy when it arrives from different
+    # sources (for example LinkedIn and Reed). Keeping the longest description
+    # recovers useful content when one source returned an empty record.
+    deduped: list[dict[str, Any]] = []
+    by_url: dict[str, dict[str, Any]] = {}
+    by_fingerprint: dict[str, dict[str, Any]] = {}
+    for job in jobs:
+        canonical = _canonical_url(str(job.get("url") or ""))
+        fingerprint = _job_fingerprint(job)
+        existing = by_url.get(canonical) if canonical else None
+        if existing is None:
+            possible = by_fingerprint.get(fingerprint)
+            if possible is not None:
+                if _can_merge(possible, job, possible.get("source") == job.get("source")):
+                    existing = possible
+        if existing is None:
+            deduped.append(job)
+            if canonical:
+                by_url[canonical] = job
+            by_fingerprint.setdefault(fingerprint, job)
+        else:
+            _merge_job(existing, job)
+            merged_canonical = _canonical_url(str(existing.get("url") or ""))
+            if merged_canonical:
+                by_url[merged_canonical] = existing
+            by_fingerprint[fingerprint] = existing
+    return deduped
 
 
 _COUNTRY_WORDS = re.compile(r"\b(?:united kingdom|uk|great britain|england|scotland|wales|northern ireland|area|region)\b")
@@ -66,28 +173,54 @@ def filter_by_location(jobs: list[dict[str, Any]], allowed_terms: list[str] | No
     for job in jobs:
         location = str(job.get("location", "")).strip().lower()
         remainder = re.sub(r"[\s,;-]+", " ", _COUNTRY_WORDS.sub("", location)).strip()
-        if remainder in {"", "not specified", "remote"} or any(p.search(location) for p in patterns):
+        if remainder in {"", "not specified", "remote", "wide", "nationwide", "anywhere"} or any(p.search(location) for p in patterns):
             kept.append(job)
     return kept
 
 
+_CONTRACT_TITLE = re.compile(
+    r"\bcontract(?:or)?\b|\boutside\s+ir35\b|\binside\s+ir35\b|\binterim\b",
+    re.IGNORECASE,
+)
+_CONTRACT_DESCRIPTION = re.compile(
+    r"\boutside\s+ir35\b|\binside\s+ir35\b|\bir35\b|"
+    r"\bday\s+rate\b|\bdaily\s+rate\b|\bper\s+day\b|/\s*day\b|"
+    r"\bfixed[\s-]term\b|\binterim\b|"
+    r"\bcontract\s+(?:role|position|opportunity|assignment|job|engagement)\b|"
+    r"\bcontract\s+(?:length|duration)\b|"
+    r"\b\d+\s*[-–]?\s*(?:month|months)\s+(?:contract|engagement|assignment)\b|"
+    r"\bcontractor\b",
+    re.IGNORECASE,
+)
+_PERMANENT_SIGNAL = re.compile(
+    r"\bpermanent\b|\bfull[\s-]?time\b|\bemployee\b",
+    re.IGNORECASE,
+)
+
+
 def _employment_type(raw_type: str, title: str, description: str) -> str:
+    """Classify a listing without letting a generic source "full-time" label
+    override explicit contract evidence such as IR35, day rate or fixed term.
+    """
     raw = raw_type.lower().replace("_", "-")
     title_text = title.lower().replace("_", "-")
     desc = description.lower().replace("_", "-")
-    contract_terms = ("contract", "contractor", "day rate", "daily rate", "per day", "/day", "inside ir35", "outside ir35", "fixed-term")
+    contract_terms = (
+        "contract", "contractor", "day rate", "daily rate", "per day", "/day",
+        "inside ir35", "outside ir35", "fixed-term",
+    )
     permanent_terms = ("permanent", "full-time", "full time", "fulltime", "employee")
     if any(word in raw for word in contract_terms):
         return "contract"
+    if _CONTRACT_TITLE.search(title_text):
+        return "contract"
+    if _CONTRACT_DESCRIPTION.search(desc):
+        return "contract"
     if any(word in raw for word in permanent_terms):
         return "permanent"
-    if any(word in title_text for word in contract_terms):
-        return "contract"
-    if any(word in title_text for word in permanent_terms):
+    if _PERMANENT_SIGNAL.search(title_text):
         return "permanent"
-    if any(word in desc for word in ("contract role", "contract position", "day rate", "daily rate", "per day", "/day", "inside ir35", "outside ir35", "fixed-term")):
-        return "contract"
-    if any(word in desc for word in ("permanent role", "full-time", "full time", "annual salary", "per annum", "/year")):
+    if any(word in desc for word in ("permanent role", "permanent position", "full-time", "full time", "annual salary", "per annum", "/year")):
         return "permanent"
     return "unknown"
 

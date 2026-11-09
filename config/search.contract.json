@@ -1,0 +1,77 @@
+{
+  "keywords": [
+    "DevOps Engineer",
+    "Platform Engineer",
+    "Site Reliability Engineer",
+    "Cloud Engineer",
+    "Infrastructure Engineer",
+    "AWS Engineer",
+    "Kubernetes Engineer",
+    "Terraform Engineer",
+    "Python Automation Engineer",
+    "DevSecOps Engineer",
+    "MLOps Engineer",
+    "Build and Release Engineer",
+    "Outside IR35",
+    "Inside IR35",
+    "day rate",
+    "interim"
+  ],
+  "locations": [
+    "United Kingdom"
+  ],
+  "github_profile_url": "https://github.com/nadeembhatti1970",
+  "date_posted": "past_week",
+  "max_results": 300,
+  "allowed_location_terms": [
+    "london",
+    "birmingham",
+    "coventry",
+    "warwickshire",
+    "west midlands",
+    "solihull",
+    "warwick",
+    "leamington",
+    "kenilworth",
+    "rugby",
+    "stratford-upon-avon",
+    "manchester",
+    "leeds",
+    "bristol",
+    "edinburgh"
+  ],
+  "employment_types": [
+    "contract"
+  ],
+  "workplace_arrangements": [
+    "remote",
+    "hybrid",
+    "onsite"
+  ],
+  "currency": "GBP",
+  "minimum_day_rate": 600,
+  "minimum_annual_salary": null,
+  "exclude_unknown_compensation": false,
+  "include_unknown_contract_compensation": true,
+  "exclude_security_clearance": true,
+  "review_documents": true,
+  "review_linkedin_profile": true,
+  "output": {
+    "root_dir": "outputs",
+    "dated_subfolders": true,
+    "date_format": "%Y-%m-%d",
+    "raw_jobs_filename": "raw_jobs.json",
+    "prioritized_jobs_filename": "prioritized_jobs.json",
+    "tracker_html_filename": "tracker.html",
+    "tracker_csv_filename": "tracker.csv",
+    "tracker_formats": [
+      "html",
+      "csv"
+    ],
+    "application_format": "docx"
+  },
+  "min_tech_overlap": 60,
+  "role_family_gate": true,
+  "reapply_after_days": 14,
+  "max_applications": 15
+}
